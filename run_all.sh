@@ -16,8 +16,9 @@
 #
 # Tunables:
 #   LAB_BATCH_ADD   — vectors per stream_add() batch (default 50000, ~400 MB peak)
-#   LAB_QPS_REPEAT / LAB_QPS_WARMUP — qps timing passes (default 1 / 0 for full)
-#   LAB_QUERY_N       — queries per sweep timing (default 5000 for full, all for light)
+#   LAB_QPS_REPEAT / LAB_QPS_WARMUP — qps timing passes (default 3 / 1 for full)
+#   LAB_QUERY_N       — queries per sweep timing (default 10000 for full, all for light)
+#   LAB_SCALING_FULL  — set to 1 to include full 1.28M base in notebook 05 scaling
 #   LAB_NOTEBOOK_TIMEOUT — wall-clock cap per notebook (default 12h)
 #   LAB_CELL_TIMEOUT  — ExecutePreprocessor per-cell timeout in seconds (default 14400)
 #
@@ -38,9 +39,9 @@ PY
 NB_KERNEL="${JUPYTER_KERNEL:-python3}"
 LAB_N_SWEEP="${LAB_N_SWEEP:-500000}"
 LAB_BATCH_ADD="${LAB_BATCH_ADD:-50000}"
-LAB_QPS_REPEAT="${LAB_QPS_REPEAT:-1}"
-LAB_QPS_WARMUP="${LAB_QPS_WARMUP:-0}"
-LAB_QUERY_N="${LAB_QUERY_N:-5000}"
+LAB_QPS_REPEAT="${LAB_QPS_REPEAT:-3}"
+LAB_QPS_WARMUP="${LAB_QPS_WARMUP:-1}"
+LAB_QUERY_N="${LAB_QUERY_N:-10000}"
 LAB_NOTEBOOK_TIMEOUT="${LAB_NOTEBOOK_TIMEOUT:-12h}"
 LAB_CELL_TIMEOUT="${LAB_CELL_TIMEOUT:-14400}"
 

@@ -33,7 +33,7 @@ idx = faiss.IndexIVFFlat(quant, DIM, 64)
 idx.train(xb)
 idx.add(xb)
 idx.nprobe = 8
-qps, lat, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
+qps, lat, lat_p99, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
 r10 = utils.compute_recall(I, gt, 10)
 print(f"IVFFlat: qps={qps:.0f} lat={lat:.2f}ms R@10={r10:.3f}")
 
@@ -42,7 +42,7 @@ idx = faiss.IndexIVFPQ(faiss.IndexFlatL2(DIM), DIM, 64, 16, 8)
 idx.train(xb)
 idx.add(xb)
 idx.nprobe = 8
-qps, lat, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
+qps, lat, lat_p99, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
 r10 = utils.compute_recall(I, gt, 10)
 print(f"IVFPQ:   qps={qps:.0f} lat={lat:.2f}ms R@10={r10:.3f}")
 
@@ -52,7 +52,7 @@ idx = faiss.IndexIVFScalarQuantizer(faiss.IndexFlatL2(DIM), DIM, 64,
 idx.train(xb)
 idx.add(xb)
 idx.nprobe = 8
-qps, lat, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
+qps, lat, lat_p99, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
 r10 = utils.compute_recall(I, gt, 10)
 print(f"IVFSQ:   qps={qps:.0f} lat={lat:.2f}ms R@10={r10:.3f}")
 
@@ -61,7 +61,7 @@ idx = faiss.IndexHNSWFlat(DIM, 16)
 idx.hnsw.efConstruction = 80
 idx.add(xb)
 idx.hnsw.efSearch = 40
-qps, lat, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
+qps, lat, lat_p99, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
 r10 = utils.compute_recall(I, gt, 10)
 size = utils.index_size_mb(idx)
 print(f"HNSW:    qps={qps:.0f} lat={lat:.2f}ms R@10={r10:.3f} size={size:.2f}MB")
@@ -70,7 +70,7 @@ print(f"HNSW:    qps={qps:.0f} lat={lat:.2f}ms R@10={r10:.3f} size={size:.2f}MB"
 idx = faiss.IndexLSH(DIM, 256)
 idx.train(xb)
 idx.add(xb)
-qps, lat, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
+qps, lat, lat_p99, I = utils.measure_qps(lambda q, k: idx.search(q, k), xq, K, repeat=2)
 r10 = utils.compute_recall(I, gt, 10)
 print(f"LSH:     qps={qps:.0f} lat={lat:.2f}ms R@10={r10:.3f}")
 

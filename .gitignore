@@ -2,9 +2,6 @@ data/
 *.fvecs
 *.ivecs
 *.h5
-docs/img/full/
-docs/img/light/
-docs/img/*.png
 .ipynb_checkpoints/
 __pycache__/
 *.pyc

@@ -27,6 +27,7 @@ def write(nb, path):
 # Max grids used when generating per-config notebook cells (light mode skips via NLIST_GRID etc.)
 _ALL_NLIST = [256, 1024, 4096, 16384]
 _ALL_PQ_M = [32, 64, 128]
+_ALL_PQ_NLIST = [1024, 4096]
 _ALL_SQ_NAMES = ["SQ8", "SQ4"]
 _ALL_HNSW_M = [8, 16, 32, 48]
 _ALL_EFC = [40, 100, 200, 400]
@@ -47,21 +48,23 @@ else:
         idx.train(train_x)
         utils.stream_add(idx, BASE_PATH, N_SWEEP)
     size_mb = utils.index_size_mb(idx)
+    rss_mb = tb.rss_after_mb
     rss_peak_mb = tb.rss_peak_mb
-    rss_mb = rss_peak_mb
-    print(f'[nlist={{{nlist}:5}}]  build {{tb.elapsed:6.1f}}s · size {{size_mb:7.1f}} MB · peak RSS {{rss_peak_mb:7.1f}} MB')
+    rss_delta_mb = tb.rss_delta_mb
+    print(f'[nlist={{{nlist}:5}}]  build {{tb.elapsed:6.1f}}s · size {{size_mb:7.1f}} MB · RSS {{rss_mb:7.1f}} MB · peak {{rss_peak_mb:7.1f}} MB')
     for nprobe in NPROBE_GRID:
         if nprobe > {nlist}:
             continue
         idx.nprobe = nprobe
-        qps, lat_ms, I = utils.measure_qps(
+        qps, lat_ms, lat_p99_ms, I = utils.measure_qps(
             lambda q,k: idx.search(q,k), queries_sweep, QUERY_K,
             repeat=QPS_REPEAT, warmup=QPS_WARMUP,
         )
         recalls = utils.compute_recalls(I, gt_local[:QUERY_N], (1, 10, 100))
         rows.append(dict(algo='IVFFlat', nlist={nlist}, nprobe=nprobe,
                         build_s=tb.elapsed, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
-                        qps=qps, latency_ms=lat_ms,
+                        rss_delta_mb=rss_delta_mb, **utils.bench_meta(),
+                        qps=qps, latency_ms=lat_ms, latency_p99_ms=lat_p99_ms,
                         recall_1=recalls[1], recall_10=recalls[10], recall_100=recalls[100],
                         n_base=N_SWEEP))
         print(f'    nprobe={{nprobe:5}}  qps={{qps:8.1f}}  R@100={{recalls[100]:.3f}}')
@@ -71,33 +74,35 @@ else:
 """.strip()
 
 
-def _ivfpq_m_cell(m: int) -> str:
+def _ivfpq_nlist_m_cell(nlist: int, m: int) -> str:
     return f"""
-if {m} not in PQ_M_GRID:
-    print('skip IVFPQ M={m}')
+if {nlist} not in PQ_NLIST_GRID or {m} not in PQ_M_GRID:
+    print('skip IVFPQ nlist={nlist} M={m}')
 else:
     rows = []
     quant = faiss.IndexFlatL2(DIM)
-    idx = faiss.IndexIVFPQ(quant, DIM, best_nlist, int({m}), int(PQ_NBITS))
-    with utils.timed('train+add PQ M={m}', sample_rss_peak=True) as tb:
+    idx = faiss.IndexIVFPQ(quant, DIM, {nlist}, int({m}), int(PQ_NBITS))
+    with utils.timed('train+add PQ nlist={nlist} M={m}', sample_rss_peak=True) as tb:
         idx.train(train_x)
         utils.stream_add(idx, BASE_PATH, N_SWEEP)
     size_mb = utils.index_size_mb(idx)
+    rss_mb = tb.rss_after_mb
     rss_peak_mb = tb.rss_peak_mb
-    rss_mb = rss_peak_mb
-    print(f'[PQ M={{{m}:4}}]  build {{tb.elapsed:6.1f}}s · size {{size_mb:7.1f}} MB')
+    rss_delta_mb = tb.rss_delta_mb
+    print(f'[PQ nlist={{{nlist}:5}} M={{{m}:4}}]  build {{tb.elapsed:6.1f}}s · size {{size_mb:7.1f}} MB')
     for nprobe in NPROBE_GRID:
-        if nprobe > best_nlist:
+        if nprobe > {nlist}:
             continue
         idx.nprobe = nprobe
-        qps, lat_ms, I = utils.measure_qps(
+        qps, lat_ms, lat_p99_ms, I = utils.measure_qps(
             lambda q,k: idx.search(q,k), queries_sweep, QUERY_K,
             repeat=QPS_REPEAT, warmup=QPS_WARMUP,
         )
         recalls = utils.compute_recalls(I, gt_local[:QUERY_N], (1, 10, 100))
-        rows.append(dict(algo='IVFPQ', nlist=best_nlist, nprobe=nprobe, M={m}, nbits=PQ_NBITS,
+        rows.append(dict(algo='IVFPQ', nlist={nlist}, nprobe=nprobe, M={m}, nbits=PQ_NBITS,
                         build_s=tb.elapsed, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
-                        qps=qps, latency_ms=lat_ms,
+                        rss_delta_mb=rss_delta_mb, **utils.bench_meta(),
+                        qps=qps, latency_ms=lat_ms, latency_p99_ms=lat_p99_ms,
                         recall_1=recalls[1], recall_10=recalls[10], recall_100=recalls[100],
                         n_base=N_SWEEP))
         print(f'    nprobe={{nprobe:5}}  qps={{qps:8.1f}}  R@100={{recalls[100]:.3f}}')
@@ -118,21 +123,23 @@ else:
         idx.train(train_x)
         utils.stream_add(idx, BASE_PATH, N_SWEEP)
     size_mb = utils.index_size_mb(idx)
+    rss_mb = tb.rss_after_mb
     rss_peak_mb = tb.rss_peak_mb
-    rss_mb = rss_peak_mb
+    rss_delta_mb = tb.rss_delta_mb
     print(f'[SQ {name}]  build {{tb.elapsed:5.1f}}s · size {{size_mb:7.1f}} MB')
     for nprobe in NPROBE_GRID:
         if nprobe > best_nlist:
             continue
         idx.nprobe = nprobe
-        qps, lat_ms, I = utils.measure_qps(
+        qps, lat_ms, lat_p99_ms, I = utils.measure_qps(
             lambda q,k: idx.search(q,k), queries_sweep, QUERY_K,
             repeat=QPS_REPEAT, warmup=QPS_WARMUP,
         )
         recalls = utils.compute_recalls(I, gt_local[:QUERY_N], (1, 10, 100))
         rows.append(dict(algo='IVFSQ', sq='{name}', nlist=best_nlist, nprobe=nprobe,
                         build_s=tb.elapsed, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
-                        qps=qps, latency_ms=lat_ms,
+                        rss_delta_mb=rss_delta_mb, **utils.bench_meta(),
+                        qps=qps, latency_ms=lat_ms, latency_p99_ms=lat_p99_ms,
                         recall_1=recalls[1], recall_10=recalls[10], recall_100=recalls[100],
                         n_base=N_SWEEP))
         print(f'    nprobe={{nprobe:5}}  qps={{qps:8.1f}}  R@100={{recalls[100]:.3f}}')
@@ -152,19 +159,21 @@ else:
     with utils.timed('build M={m}', sample_rss_peak=True) as tb:
         utils.stream_add(idx, BASE_PATH, N_SWEEP)
     size_mb = utils.index_size_mb(idx)
+    rss_mb = tb.rss_after_mb
     rss_peak_mb = tb.rss_peak_mb
-    rss_mb = rss_peak_mb
+    rss_delta_mb = tb.rss_delta_mb
     print(f'[M={{{m}:3}}]  build {{tb.elapsed:7.1f}}s · size {{size_mb:7.1f}} MB')
     for efs in EFS_GRID:
         idx.hnsw.efSearch = efs
-        qps, lat_ms, I = utils.measure_qps(
+        qps, lat_ms, lat_p99_ms, I = utils.measure_qps(
             lambda q,k: idx.search(q,k), queries_sweep, QUERY_K,
             repeat=QPS_REPEAT, warmup=QPS_WARMUP,
         )
         recalls = utils.compute_recalls(I, gt_local[:QUERY_N], (1, 10, 100))
         rows.append(dict(algo='HNSW', M={m}, efConstruction=EFC_FIXED, efSearch=efs,
                         build_s=tb.elapsed, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
-                        qps=qps, latency_ms=lat_ms,
+                        rss_delta_mb=rss_delta_mb, **utils.bench_meta(),
+                        qps=qps, latency_ms=lat_ms, latency_p99_ms=lat_p99_ms,
                         recall_1=recalls[1], recall_10=recalls[10], recall_100=recalls[100],
                         n_base=N_SWEEP, study='varyM'))
         print(f'    efS={{efs:4}}  qps={{qps:8.1f}}  R@100={{recalls[100]:.3f}}')
@@ -184,19 +193,21 @@ else:
     with utils.timed('build efC={efc}', sample_rss_peak=True) as tb:
         utils.stream_add(idx, BASE_PATH, N_SWEEP)
     size_mb = utils.index_size_mb(idx)
+    rss_mb = tb.rss_after_mb
     rss_peak_mb = tb.rss_peak_mb
-    rss_mb = rss_peak_mb
+    rss_delta_mb = tb.rss_delta_mb
     print(f'[efC={{{efc}:4}}]  build {{tb.elapsed:7.1f}}s · size {{size_mb:7.1f}} MB')
     for efs in EFS_GRID:
         idx.hnsw.efSearch = efs
-        qps, lat_ms, I = utils.measure_qps(
+        qps, lat_ms, lat_p99_ms, I = utils.measure_qps(
             lambda q,k: idx.search(q,k), queries_sweep, QUERY_K,
             repeat=QPS_REPEAT, warmup=QPS_WARMUP,
         )
         recalls = utils.compute_recalls(I, gt_local[:QUERY_N], (1, 10, 100))
         rows.append(dict(algo='HNSW', M=M_FIXED, efConstruction={efc}, efSearch=efs,
                         build_s=tb.elapsed, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
-                        qps=qps, latency_ms=lat_ms,
+                        rss_delta_mb=rss_delta_mb, **utils.bench_meta(),
+                        qps=qps, latency_ms=lat_ms, latency_p99_ms=lat_p99_ms,
                         recall_1=recalls[1], recall_10=recalls[10], recall_100=recalls[100],
                         n_base=N_SWEEP, study='varyEFC'))
         print(f'    efS={{efs:4}}  qps={{qps:8.1f}}  R@100={{recalls[100]:.3f}}')
@@ -215,16 +226,18 @@ else:
         idx.train(train_x)
         utils.stream_add(idx, BASE_PATH, N_SWEEP)
     size_mb = utils.index_size_mb(idx)
+    rss_mb = tb.rss_after_mb
     rss_peak_mb = tb.rss_peak_mb
-    rss_mb = rss_peak_mb
-    qps, lat_ms, I = utils.measure_qps(
+    rss_delta_mb = tb.rss_delta_mb
+    qps, lat_ms, lat_p99_ms, I = utils.measure_qps(
         lambda q,k: idx.search(q,k), queries_sweep, QUERY_K,
         repeat=QPS_REPEAT, warmup=QPS_WARMUP,
     )
     recalls = utils.compute_recalls(I, gt_local[:QUERY_N], (1, 10, 100))
     rows = [dict(algo='LSH', nbits={nbits},
                build_s=tb.elapsed, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
-               qps=qps, latency_ms=lat_ms,
+               rss_delta_mb=rss_delta_mb, **utils.bench_meta(),
+               qps=qps, latency_ms=lat_ms, latency_p99_ms=lat_p99_ms,
                recall_1=recalls[1], recall_10=recalls[10], recall_100=recalls[100],
                n_base=N_SWEEP)]
     utils.append_results(rows, LSH_PATH)
@@ -510,10 +523,14 @@ else:
 # Per-query recall@100 distribution (full run only asserts against GT)
 per_q = np.array([np.intersect1d(I_flat[i], gts[i]).size / 100 for i in range(SAMPLE_Q)])
 fig, ax = plt.subplots(figsize=(8, 4))
-ax.hist(per_q, bins=40, color='seagreen', edgecolor='white')
+bins = np.linspace(0, 1, 21) if per_q.max() > per_q.min() + 1e-6 else np.linspace(0, 1, 6)
+ax.hist(per_q, bins=bins, color='seagreen', edgecolor='white')
 ax.set_xlabel('Recall@100 of Flat vs supplied GT')
 ax.set_ylabel('# queries')
-ax.set_title(f'Per-query GT match — mean {per_q.mean():.4f} · min {per_q.min():.2f}')
+ax.set_title(f'Per-query GT match — mean {per_q.mean():.4f} · std {per_q.std():.4f} · min {per_q.min():.2f}')
+if per_q.max() <= per_q.min() + 1e-6:
+    ax.text(0.5, 0.5, 'All queries identical recall\n(full-base GT match)', transform=ax.transAxes,
+            ha='center', va='center', fontsize=10)
 plt.tight_layout(); plt.savefig(DOCS_IMG / '01_gt_recall_hist.png', dpi=120, bbox_inches='tight'); plt.show()
 
 if int(os.environ.get('LAB_LIGHT', '0')):
@@ -630,9 +647,10 @@ display(df_ivf.tail(8))
 """))
 
 _ivfpq_sweep = []
-for _m in _ALL_PQ_M:
-    _ivfpq_sweep.append(md(f"#### IVF+PQ — M={_m}"))
-    _ivfpq_sweep.append(code(_ivfpq_m_cell(_m)))
+for _nl in _ALL_PQ_NLIST:
+    for _m in _ALL_PQ_M:
+        _ivfpq_sweep.append(md(f"#### IVF+PQ — nlist={_nl} M={_m}"))
+        _ivfpq_sweep.append(code(_ivfpq_nlist_m_cell(_nl, _m)))
 _ivfpq_sweep.append(code(r"""
 df_pq = pd.read_csv(IVF_PQ_PATH)
 display(df_pq.tail(6))
@@ -678,7 +696,8 @@ LAB_LIGHT = int(os.environ.get('LAB_LIGHT', '0'))
 # IVFFlat grid
 NLIST_GRID  = [256, 1024, 4096, 16384]
 NPROBE_GRID = [1, 4, 16, 64, 256, 1024]
-# IVF+PQ grid (chosen nlist = best from IVFFlat — overwritten below)
+# IVF+PQ grid — nlist × M (task requires varying coarse quantiser, not one nlist)
+PQ_NLIST_GRID = [1024, 4096]
 PQ_M_GRID = [32, 64, 128]   # divides 2048: 64,32,16 D per sub-vector
 PQ_NBITS  = 8
 # IVF+SQ grid
@@ -688,7 +707,7 @@ SQ_TYPES = [
 ]
 
 # Number of vectors used for IVF training (k-means).  ≥ 30 * nlist recommended.
-TRAIN_N = 200_000
+TRAIN_N = max(200_000, 30 * max(NLIST_GRID))
 
 QUERY_K = 100  # search depth; we report R@1, R@10, R@100
 
@@ -696,19 +715,21 @@ if LAB_LIGHT:
     TRAIN_N = min(TRAIN_N, 80_000)
     NLIST_GRID = [256, 1024]
     NPROBE_GRID = [1, 4, 16, 64, 256]
+    PQ_NLIST_GRID = [256, 1024]
     PQ_M_GRID = [32, 64]
     SQ_TYPES = [('SQ8', faiss.ScalarQuantizer.QT_8bit)]
 
 QPS_REPEAT = int(os.environ.get('LAB_QPS_REPEAT', '2' if LAB_LIGHT else '1'))
 QPS_WARMUP = int(os.environ.get('LAB_QPS_WARMUP', '1' if LAB_LIGHT else '0'))
 # Full runs: fewer queries per sweep cell keeps nbconvert under per-cell timeout.
-_default_qn = queries.shape[0] if LAB_LIGHT else min(5000, queries.shape[0])
+_default_qn = queries.shape[0] if LAB_LIGHT else min(10000, queries.shape[0])
 QUERY_N = int(os.environ.get('LAB_QUERY_N', str(_default_qn)))
 queries_sweep = queries[:QUERY_N]
 print(f"N_SWEEP={N_SWEEP:,}  TRAIN_N={TRAIN_N:,}  LAB_LIGHT={LAB_LIGHT}")
 print(f"QPS_REPEAT={QPS_REPEAT}  QPS_WARMUP={QPS_WARMUP}  QUERY_N={QUERY_N}")
 print(f"NLIST_GRID={NLIST_GRID}  NPROBE_GRID={NPROBE_GRID}")
-print(f"PQ_M_GRID={PQ_M_GRID}  SQ_TYPES={[t[0] for t in SQ_TYPES]}")
+print(f"PQ_NLIST_GRID={PQ_NLIST_GRID}  PQ_M_GRID={PQ_M_GRID}  SQ_TYPES={[t[0] for t in SQ_TYPES]}")
+print(f"TRAIN_N={TRAIN_N:,}  faiss_threads={faiss.omp_get_max_threads()}")
 """),
     md("""
 ## Helper — stream base vectors via memmap + recompute exact GT for the sweep subset
@@ -823,40 +844,40 @@ plt.savefig(DOCS_IMG / '02_ivf_qps_vs_nprobe.png', dpi=120); plt.show()
 df_bt = df_ivf.drop_duplicates('nlist')[['nlist', 'build_s', 'size_mb']]
 fig, ax = plt.subplots(1, 2, figsize=(11, 4))
 sns.barplot(data=df_bt, x='nlist', y='build_s', ax=ax[0], color='steelblue')
-ax[0].set_title('IVFFlat build time'); ax[0].set_ylabel('seconds')
+ax[0].set_yscale('log')
+ax[0].set_title('IVFFlat build time (log)'); ax[0].set_ylabel('seconds')
 sns.barplot(data=df_bt, x='nlist', y='size_mb', ax=ax[1], color='darkorange')
 ax[1].set_title('IVFFlat index size'); ax[1].set_ylabel('MB')
 plt.tight_layout(); plt.savefig(DOCS_IMG / '02_ivf_build_size.png', dpi=120); plt.show()
 display(df_bt.reset_index(drop=True))
 """),
     md("""
-## IVF+PQ sweep — best nlist × PQ M
+## IVF+PQ sweep — nlist × PQ M
+
+Full grid over `PQ_NLIST_GRID × PQ_M_GRID` (not a single best nlist from IVFFlat).
 """),
     code(r"""
-# Use the nlist with the best recall@100 at the highest tested nprobe as the IVF coarse
-# quantiser for both PQ and SQ experiments.
-best_nlist = int((df_ivf
-              .groupby('nlist')['recall_100'].max()
-              .idxmax()))
-print(f'using nlist={best_nlist} for IVF+PQ and IVF+SQ')
 IVF_PQ_PATH = RESULTS / 'ivf_pq.csv'
 utils.init_results_csv(IVF_PQ_PATH)
 print('IVFPQ checkpoint:', IVF_PQ_PATH)
+
+# SQ still uses the IVFFlat winner as coarse quantiser.
+best_nlist = int((df_ivf
+              .groupby('nlist')['recall_100'].max()
+              .idxmax()))
+print(f'using nlist={best_nlist} for IVF+SQ only')
 """),
     *_ivfpq_sweep,
     md("""
 ### Plot 6 — IVF+PQ Recall@100 vs nprobe (per M)
 """),
     code(r"""
-fig, ax = plt.subplots(figsize=(8, 5))
-for M, sub in df_pq.groupby('M'):
+fig, ax = plt.subplots(figsize=(9, 5))
+for (nl, M), sub in df_pq.groupby(['nlist', 'M']):
     sub = sub.sort_values('nprobe')
-    ax.plot(sub.nprobe, sub.recall_100, marker='o', label=f'PQ M={M}')
-# Overlay IVFFlat at the same nlist as upper bound
-ref = df_ivf[df_ivf.nlist == best_nlist].sort_values('nprobe')
-ax.plot(ref.nprobe, ref.recall_100, 'k--', lw=1.2, label=f'IVFFlat (nlist={best_nlist})')
+    ax.plot(sub.nprobe, sub.recall_100, marker='o', label=f'nlist={int(nl)} M={int(M)}')
 ax.set_xscale('log'); ax.set_xlabel('nprobe'); ax.set_ylabel('Recall@100')
-ax.set_title(f'IVF+PQ — Recall@100 vs nprobe (nlist={best_nlist})')
+ax.set_title('IVF+PQ — Recall@100 vs nprobe (per nlist × M)')
 ax.legend(); ax.set_ylim(0, 1.02)
 plt.tight_layout(); plt.savefig(DOCS_IMG / '02_ivfpq_recall.png', dpi=120); plt.show()
 """),
@@ -864,38 +885,46 @@ plt.tight_layout(); plt.savefig(DOCS_IMG / '02_ivfpq_recall.png', dpi=120); plt.
 ### Plot 7 — IVF+PQ Pareto QPS vs Recall@100 (per M)
 """),
     code(r"""
-fig, ax = plt.subplots(figsize=(8, 5))
-palette = sns.color_palette('plasma', len(PQ_M_GRID))
-for color, (M, sub) in zip(palette, df_pq.groupby('M')):
-    ax.scatter(sub.recall_100, sub.qps, color=color, s=45, edgecolors='k', label=f'PQ M={M}')
+fig, ax = plt.subplots(figsize=(9, 5))
+markers = ['o', 's', '^', 'D', 'v', 'P']
+for i, (nl, M) in enumerate(sorted({(int(r.nlist), int(r.M)) for _, r in df_pq.iterrows()})):
+    sub = df_pq[(df_pq.nlist == nl) & (df_pq.M == M)]
+    mk = markers[i % len(markers)]
+    ax.scatter(sub.recall_100, sub.qps, marker=mk, s=45, edgecolors='k',
+               label=f'nlist={nl} M={M}')
     ms = utils.pareto_frontier(sub.recall_100.values, sub.qps.values)
-    o = np.argsort(sub.recall_100.values[ms])
-    ax.plot(sub.recall_100.values[ms][o], sub.qps.values[ms][o], color=color, ls='--', lw=0.8)
+    if ms.any():
+        o = np.argsort(sub.recall_100.values[ms])
+        ax.plot(sub.recall_100.values[ms][o], sub.qps.values[ms][o], ls='--', lw=0.8, alpha=0.7)
 ax.scatter(df_ivf[df_ivf.nlist==best_nlist].recall_100, df_ivf[df_ivf.nlist==best_nlist].qps,
-           marker='X', color='k', s=70, label=f'IVFFlat nlist={best_nlist}')
+           marker='X', color='k', s=90, label=f'IVFFlat nlist={best_nlist}', zorder=5)
 ax.set_yscale('log'); ax.set_xlabel('Recall@100'); ax.set_ylabel('QPS (log)')
-ax.set_title('IVF+PQ — QPS vs Recall@100')
-ax.legend()
+ax.set_title('IVF+PQ — QPS vs Recall@100 (each nlist × M)')
+ax.legend(fontsize=7, ncol=2, loc='lower right')
 plt.tight_layout(); plt.savefig(DOCS_IMG / '02_ivfpq_pareto.png', dpi=120); plt.show()
 """),
     md("""
 ### Plot 8 — Index size vs PQ M (compression vs flat)
 """),
     code(r"""
-size_df = pd.concat([
-    pd.DataFrame({'config': [f'IVFFlat nlist={best_nlist}'],
-                  'size_mb': [df_ivf[df_ivf.nlist==best_nlist].size_mb.iloc[0]]}),
-    pd.DataFrame({'config': [f'IVF+PQ M={M}' for M in PQ_M_GRID],
-                  'size_mb': [df_pq[df_pq.M==M].size_mb.iloc[0] for M in PQ_M_GRID]}),
-]).reset_index(drop=True)
-fig, ax = plt.subplots(figsize=(8, 4))
-sns.barplot(data=size_df, x='config', y='size_mb', ax=ax,
-            palette=['black'] + list(sns.color_palette('plasma', len(PQ_M_GRID))))
+size_rows = [{'family': 'IVFFlat', 'nlist': best_nlist, 'M': None,
+              'size_mb': float(df_ivf[df_ivf.nlist==best_nlist].size_mb.iloc[0])}]
+for nl in sorted(df_pq.nlist.unique()):
+    for M in sorted(df_pq.M.unique()):
+        sub = df_pq[(df_pq.nlist == nl) & (df_pq.M == M)]
+        size_rows.append({'family': 'IVFPQ', 'nlist': int(nl), 'M': int(M),
+                         'size_mb': float(sub.size_mb.iloc[0])})
+size_df = pd.DataFrame(size_rows)
+size_df['label'] = size_df.apply(
+    lambda r: f"Flat L{int(r.nlist)}" if r.family == 'IVFFlat' else f"PQ L{int(r.nlist)} M{int(r.M)}",
+    axis=1)
+fig, ax = plt.subplots(figsize=(10, 4))
+sns.barplot(data=size_df, x='label', y='size_mb', hue='family', ax=ax, dodge=False)
 ax.set_yscale('log'); ax.set_ylabel('MB (log)')
-for i, v in enumerate(size_df.size_mb):
-    ax.text(i, v, f'{v:.0f}', ha='center', va='bottom', fontsize=9)
-ax.set_title('Index footprint  ·  IVFFlat vs IVF+PQ (8 bits per sub-vector)')
-plt.xticks(rotation=20)
+ax.set_title('Index footprint — IVFFlat vs IVF+PQ (per nlist × M)')
+for i, (_, r) in enumerate(size_df.iterrows()):
+    ax.text(i, r.size_mb, f'{r.size_mb:.0f}', ha='center', va='bottom', fontsize=8)
+plt.xticks(rotation=25, ha='right')
 plt.tight_layout(); plt.savefig(DOCS_IMG / '02_ivfpq_size.png', dpi=120); plt.show()
 display(size_df)
 """),
@@ -1017,7 +1046,7 @@ if LAB_LIGHT:
     EFC_GRID = [40, 100, 200]
 QPS_REPEAT = int(os.environ.get('LAB_QPS_REPEAT', '2' if LAB_LIGHT else '1'))
 QPS_WARMUP = int(os.environ.get('LAB_QPS_WARMUP', '1' if LAB_LIGHT else '0'))
-_default_qn = queries.shape[0] if LAB_LIGHT else min(5000, queries.shape[0])
+_default_qn = queries.shape[0] if LAB_LIGHT else min(10000, queries.shape[0])
 QUERY_N = int(os.environ.get('LAB_QUERY_N', str(_default_qn)))
 queries_sweep = queries[:QUERY_N]
 print(f"N_SWEEP={N_SWEEP:,}  LAB_LIGHT={LAB_LIGHT}  M_GRID={M_GRID}  EFC_FIXED={EFC_FIXED}  EFS_GRID={EFS_GRID}")
@@ -1076,11 +1105,14 @@ for col, (M, sub) in zip(palette, df_M.groupby('M')):
     ms = utils.pareto_frontier(sub.recall_100.values, sub.qps.values)
     o = np.argsort(sub.recall_100.values[ms])
     ax.plot(sub.recall_100.values[ms][o], sub.qps.values[ms][o], color=col, lw=0.8, ls='--', alpha=0.85)
-    for _, r in sub.iloc[np.where(ms)[0]].iterrows():
-        ax.annotate(f"efS={int(r.efSearch)}", (r.recall_100, r.qps), fontsize=6, alpha=0.75,
-                    xytext=(3, 3), textcoords='offset points')
+    pidx = np.where(ms)[0]
+    if len(pidx) <= 6:
+        for i in pidx:
+            r = sub.iloc[i]
+            ax.annotate(f"efS={int(r.efSearch)}", (r.recall_100, r.qps), fontsize=6, alpha=0.75,
+                        xytext=(3, 3), textcoords='offset points')
 ax.set_yscale('log'); ax.set_xlabel('Recall@100'); ax.set_ylabel('QPS (log)')
-ax.set_title('HNSW — Pareto QPS vs Recall@100  (efC={})'.format(EFC_FIXED))
+ax.set_title('HNSW — Pareto QPS vs Recall@100  (efC={}; labels on Pareto only)'.format(EFC_FIXED))
 ax.legend()
 plt.tight_layout(); plt.savefig(DOCS_IMG / '03_hnsw_pareto_M.png', dpi=120); plt.show()
 """),
@@ -1203,7 +1235,7 @@ if LAB_LIGHT:
     NBITS_GRID = [128, 256, 512, 1024]
 QPS_REPEAT = int(os.environ.get('LAB_QPS_REPEAT', '2' if LAB_LIGHT else '1'))
 QPS_WARMUP = int(os.environ.get('LAB_QPS_WARMUP', '1' if LAB_LIGHT else '0'))
-_default_qn = queries.shape[0] if LAB_LIGHT else min(5000, queries.shape[0])
+_default_qn = queries.shape[0] if LAB_LIGHT else min(10000, queries.shape[0])
 QUERY_N = int(os.environ.get('LAB_QUERY_N', str(_default_qn)))
 queries_sweep = queries[:QUERY_N]
 print(f"N_SWEEP={N_SWEEP:,}  LAB_LIGHT={LAB_LIGHT}  NBITS_GRID={NBITS_GRID}")
@@ -1246,6 +1278,8 @@ fig, ax = plt.subplots(figsize=(8, 5))
 for col, k in zip(['#1f77b4', '#ff7f0e', '#2ca02c'], [1, 10, 100]):
     ax.plot(df_lsh.nbits, df_lsh[f'recall_{k}'], marker='o', label=f'R@{k}', color=col)
 ax.set_xscale('log'); ax.set_xlabel('nbits'); ax.set_ylabel('Recall')
+ax.set_xticks(df_lsh.nbits)
+ax.set_xticklabels([str(int(x)) for x in df_lsh.nbits])
 ax.set_title(f'LSH — recall vs nbits  (N={N_SWEEP:,}, dim={DIM})')
 ax.legend(); ax.set_ylim(0, 1.02)
 plt.tight_layout(); plt.savefig(DOCS_IMG / '04_lsh_recall.png', dpi=120); plt.show()
@@ -1361,14 +1395,17 @@ for fam, sub in combined.groupby('family'):
     ax.scatter(sub.recall_100, sub.qps, c=palette.get(fam, 'k'), label=fam,
                s=35, alpha=0.65, edgecolors='k', linewidth=0.3)
 
-# global Pareto
+# global Pareto — annotate hull only (≤5 labels)
 mask = utils.pareto_frontier(combined.recall_100.values, combined.qps.values)
 order = np.argsort(combined.recall_100.values[mask])
 ax.plot(combined.recall_100.values[mask][order], combined.qps.values[mask][order],
         'k--', lw=1.2, label='global Pareto')
-for i in np.where(mask)[0]:
-    r = combined.iloc[i]
-    ax.annotate(str(r.algo), (r.recall_100, r.qps), fontsize=7, alpha=0.8,
+df_p = combined.iloc[np.where(mask)[0]].sort_values('recall_100')
+for _, r in df_p.iloc[::max(1, len(df_p) // 5)][:5].iterrows():
+    lbl = f"{r.algo}"
+    if pd.notna(r.get('nlist')): lbl += f" L{int(r.nlist)}"
+    if pd.notna(r.get('M')): lbl += f" M{int(r.M)}"
+    ax.annotate(lbl, (r.recall_100, r.qps), fontsize=7, alpha=0.85,
                 xytext=(3, 3), textcoords='offset points')
 ax.set_yscale('log'); ax.set_xlabel('Recall@100'); ax.set_ylabel('QPS (log)')
 ax.set_title('Cross-algorithm QPS vs Recall@100')
@@ -1380,67 +1417,105 @@ plt.tight_layout(); plt.savefig(DOCS_IMG / '05_global_pareto.png', dpi=120); plt
 """),
     code(r"""
 THRESHOLDS = [0.95, 0.9, 0.8, 0.5, 0.2]
+OPERATIONAL_THR = 0.95
 
-def best_row_for_family(sub):
-    # Highest QPS among configs meeting recall threshold; else best recall overall.
-    for thr in THRESHOLDS:
-        cand = sub[sub.recall_100 >= thr]
-        if len(cand):
-            row = cand.sort_values('qps', ascending=False).iloc[0]
-            return thr, row, False
-    row = sub.sort_values(['recall_100', 'qps'], ascending=[False, False]).iloc[0]
-    return 0.0, row, True
-
-rows = []
-for fam in sorted(combined['family'].unique()):
-    sub = combined[combined.family == fam]
-    thr, b, is_fb = best_row_for_family(sub)
+def _row_to_record(fam, scenario, thr, is_fb, b):
     cfg_parts = []
     for c in ['nlist', 'nprobe', 'M', 'efConstruction', 'efSearch', 'nbits', 'sq']:
         if c in b.index and pd.notna(b[c]):
             cfg_parts.append(f'{c}={b[c]}')
-    rpm = float(b['rss_peak_mb']) if 'rss_peak_mb' in b.index and pd.notna(b.get('rss_peak_mb')) else float(b['rss_mb'])
-    rows.append(dict(
-        family=fam, threshold=thr, threshold_fallback=is_fb,
+    rss_after = float(b['rss_mb']) if pd.notna(b.get('rss_mb')) else float('nan')
+    rss_peak = float(b['rss_peak_mb']) if 'rss_peak_mb' in b.index and pd.notna(b.get('rss_peak_mb')) else rss_after
+    rss_delta = float(b['rss_delta_mb']) if 'rss_delta_mb' in b.index and pd.notna(b.get('rss_delta_mb')) else float('nan')
+    lat_p99 = float(b['latency_p99_ms']) if 'latency_p99_ms' in b.index and pd.notna(b.get('latency_p99_ms')) else float('nan')
+    return dict(
+        family=fam, scenario=scenario, threshold=thr, threshold_fallback=is_fb,
         recall_100=b.recall_100, qps=b.qps, size_mb=b.size_mb,
+        latency_ms=float(b['latency_ms']) if pd.notna(b.get('latency_ms')) else float('nan'),
+        latency_p99_ms=lat_p99,
         build_s=float(b['build_s']) if 'build_s' in b.index and pd.notna(b.get('build_s')) else float('nan'),
-        rss_mb=rpm, rss_peak_mb=rpm,
+        rss_mb=rss_after, rss_peak_mb=rss_peak, rss_delta_mb=rss_delta,
         config=', '.join(cfg_parts),
-    ))
-summary = pd.DataFrame(rows)
+    )
+
+def best_operational_row(sub, thr=OPERATIONAL_THR):
+    cand = sub[sub.recall_100 >= thr]
+    if len(cand):
+        return thr, cand.sort_values(['qps', 'recall_100'], ascending=[False, False]).iloc[0], False
+    return 0.0, sub.sort_values(['recall_100', 'qps'], ascending=[False, False]).iloc[0], True
+
+scenario_rows = []
+summary_rows = []
+for fam in sorted(combined['family'].unique()):
+    sub = combined[combined.family == fam]
+    br = sub.sort_values(['recall_100', 'qps'], ascending=[False, False]).iloc[0]
+    scenario_rows.append(_row_to_record(fam, 'best_recall', 0.0, True, br))
+    bf = sub.sort_values(['size_mb', 'recall_100'], ascending=[True, False]).iloc[0]
+    scenario_rows.append(_row_to_record(fam, 'best_footprint', 0.0, True, bf))
+    for thr in THRESHOLDS:
+        cand = sub[sub.recall_100 >= thr]
+        if len(cand):
+            bq = cand.sort_values(['qps', 'recall_100'], ascending=[False, False]).iloc[0]
+            scenario_rows.append(_row_to_record(fam, f'best_qps_at_{thr}', thr, False, bq))
+    thr, b, is_fb = best_operational_row(sub)
+    summary_rows.append(_row_to_record(fam, 'operational', thr, is_fb, b))
+
+summary = pd.DataFrame(summary_rows)
+scenarios = pd.DataFrame(scenario_rows)
 display(summary)
+display(scenarios)
 summary.to_csv(RESULTS / 'best_configs.csv', index=False)
+scenarios.to_csv(RESULTS / 'best_configs_scenarios.csv', index=False)
+print(f'Operational pick: max QPS among recall>={OPERATIONAL_THR} (else highest recall). See best_configs_scenarios.csv for alternatives.')
 """),
     md("""
-## 3 · Build time / index size / RSS comparison (best configs)
+## 3 · Build time / index size / RSS comparison (operational best configs)
+
+Peak RSS bars include **mmap page-cache** during `stream_add`, not index size alone — compare `size_mb` and `rss_delta_mb` for process growth.
 """),
     code(r"""
-sum_plot = summary.copy()
-sum_plot['rss_plot'] = sum_plot['rss_peak_mb'] if 'rss_peak_mb' in sum_plot.columns else sum_plot['rss_mb']
+sum_plot = summary.copy().sort_values('family')
 
-fig, ax = plt.subplots(1, 3, figsize=(14, 4))
-sns.barplot(data=sum_plot.sort_values('build_s'), x='family', y='build_s', ax=ax[0], palette='tab10')
+fig, ax = plt.subplots(1, 4, figsize=(16, 4))
+sns.barplot(data=sum_plot, x='family', y='build_s', ax=ax[0], hue='family', palette='tab10', legend=False)
 ax[0].set_title('Build time'); ax[0].set_ylabel('seconds')
-sns.barplot(data=sum_plot, x='family', y='size_mb', ax=ax[1], palette='tab10')
+sns.barplot(data=sum_plot, x='family', y='size_mb', ax=ax[1], hue='family', palette='tab10', legend=False)
 ax[1].set_yscale('log'); ax[1].set_title('Index size'); ax[1].set_ylabel('MB (log)')
-sns.barplot(data=sum_plot, x='family', y='rss_plot', ax=ax[2], palette='tab10')
-ax[2].set_yscale('log'); ax[2].set_title('Peak RSS (sampled build)'); ax[2].set_ylabel('MB (log)')
+sns.barplot(data=sum_plot, x='family', y='rss_mb', ax=ax[2], hue='family', palette='tab10', legend=False)
+ax[2].set_title('RSS after build'); ax[2].set_ylabel('MB')
+sns.barplot(data=sum_plot, x='family', y='rss_peak_mb', ax=ax[3], hue='family', palette='tab10', legend=False)
+ax[3].set_yscale('log'); ax[3].set_title('Peak RSS (build)'); ax[3].set_ylabel('MB (log)')
 for a in ax:
     a.tick_params(axis='x', rotation=15)
 plt.tight_layout(); plt.savefig(DOCS_IMG / '05_best_bars.png', dpi=120); plt.show()
 
-# Memory sanity: index serialised size vs sampled peak RSS (same run)
+# Index size vs RSS delta (peak includes mmap page-cache for stream_add)
 fig, ax = plt.subplots(figsize=(7, 4.5))
-ax.scatter(sum_plot['size_mb'], sum_plot['rss_plot'], s=90, c='steelblue', edgecolors='k')
+if 'rss_delta_mb' in sum_plot.columns:
+    ax.scatter(sum_plot['size_mb'], sum_plot['rss_delta_mb'], s=90, c='steelblue', edgecolors='k')
+    ax.set_ylabel('RSS delta during build (MB)')
+    ax.set_title('Index size vs RSS growth (not peak — peak tracks mmap cache)')
+else:
+    ax.scatter(sum_plot['size_mb'], sum_plot['rss_peak_mb'], s=90, c='steelblue', edgecolors='k')
+    ax.set_ylabel('Peak RSS (MB)')
+    ax.set_title('Index size vs peak RSS')
 for _, r in sum_plot.iterrows():
-    ax.annotate(r['family'], (r['size_mb'], r['rss_plot']), fontsize=9,
+    ax.annotate(r['family'], (r['size_mb'], r.get('rss_delta_mb', r['rss_peak_mb'])), fontsize=9,
                 xytext=(5, 5), textcoords='offset points')
-mx = max(sum_plot['size_mb'].max(), sum_plot['rss_plot'].max()) * 1.05
-ax.plot([0, mx], [0, mx], 'k--', lw=0.8, alpha=0.5, label='y=x (reference)')
-ax.set_xlabel('Index size on disk (MB)'); ax.set_ylabel('Peak RSS during build (MB)')
-ax.set_title('Memory sanity — serialised size vs sampled peak RSS')
-ax.legend()
+ax.set_xlabel('Index size on disk (MB)')
 plt.tight_layout(); plt.savefig(DOCS_IMG / '05_memory_sanity.png', dpi=120); plt.show()
+
+# Latency from best-config rows
+if 'latency_p99_ms' in sum_plot.columns and sum_plot['latency_p99_ms'].notna().any():
+    fig, ax = plt.subplots(figsize=(8, 4))
+    x = np.arange(len(sum_plot))
+    w = 0.35
+    ax.bar(x - w/2, sum_plot['latency_ms'], width=w, label='mean latency')
+    ax.bar(x + w/2, sum_plot['latency_p99_ms'], width=w, label='p99 latency (batch runs)')
+    ax.set_xticks(x); ax.set_xticklabels(sum_plot['family'], rotation=15)
+    ax.set_ylabel('ms / query'); ax.set_title('Query latency at best config')
+    ax.legend()
+    plt.tight_layout(); plt.savefig(DOCS_IMG / '05_latency_best.png', dpi=120); plt.show()
 """),
     md("""
 ## 4 · Scaling experiment
@@ -1461,8 +1536,10 @@ if LAB_LIGHT_05:
     print('LAB_LIGHT=1 — scaling section uses a single N:', SCALES)
 else:
     SCALES = [100_000, 250_000, 500_000, 1_000_000]
-    SCALES = [s for s in SCALES if s <= N_BASE]
-print(f"QPS_REPEAT={QPS_REPEAT}  QPS_WARMUP={QPS_WARMUP}")
+    if int(os.environ.get('LAB_SCALING_FULL', '0')):
+        SCALES.append(N_BASE)
+    SCALES = sorted({s for s in SCALES if s <= N_BASE})
+print(f"QPS_REPEAT={QPS_REPEAT}  QPS_WARMUP={QPS_WARMUP}  LAB_SCALING_FULL={os.environ.get('LAB_SCALING_FULL','0')}")
 
 def ensure_gt(n: int, k: int = 100):
     cache = DATA / f'gt_n{n}_k{k}.npy'
@@ -1475,89 +1552,97 @@ def ensure_gt(n: int, k: int = 100):
     del flat; gc.collect()
     return I
 
-scale_rows = []
-_nl = 256 if LAB_LIGHT_05 else 4096
-_np = min(64, _nl)
+_scale_csv = RESULTS / 'scaling.csv'
+if os.environ.get('SKIP_SCALING_REBUILD', '0') == '1' and _scale_csv.exists():
+    df_scale = pd.read_csv(_scale_csv)
+    print(f'SKIP_SCALING_REBUILD=1 — using existing {_scale_csv} ({len(df_scale)} rows)')
+else:
+    scale_rows = []
+    _nl = 256 if LAB_LIGHT_05 else 4096
+    _np = min(64, _nl)
 
-# One representative config per family (always include LSH when present in combined)
-configs = []
-for fam in ['IVFFlat', 'IVFPQ', 'IVFSQ', 'HNSW', 'LSH']:
-    if fam not in combined['family'].values:
-        continue
-    if fam == 'IVFFlat':
-        cfg = dict(nlist=_nl, nprobe=_np)
-    elif fam == 'IVFPQ':
-        cfg = dict(nlist=_nl, nprobe=_np, M=64)
-    elif fam == 'IVFSQ':
-        cfg = dict(nlist=_nl, nprobe=_np, sq='SQ8')
-    elif fam == 'HNSW':
-        cfg = dict(M=32, efC=200, efS=160)
-    else:
-        lsh_sub = combined[combined.family == 'LSH']
-        nb = int(lsh_sub.sort_values(['recall_100', 'qps'], ascending=[False, False]).iloc[0]['nbits'])
-        cfg = dict(nbits=nb)
-    configs.append((fam, cfg))
-print('scaling configs (all families in combined):', configs)
+    # One representative config per family (always include LSH when present in combined)
+    configs = []
+    for fam in ['IVFFlat', 'IVFPQ', 'IVFSQ', 'HNSW', 'LSH']:
+        if fam not in combined['family'].values:
+            continue
+        if fam == 'IVFFlat':
+            cfg = dict(nlist=_nl, nprobe=_np)
+        elif fam == 'IVFPQ':
+            cfg = dict(nlist=_nl, nprobe=_np, M=64)
+        elif fam == 'IVFSQ':
+            cfg = dict(nlist=_nl, nprobe=_np, sq='SQ8')
+        elif fam == 'HNSW':
+            cfg = dict(M=32, efC=200, efS=160)
+        else:
+            lsh_sub = combined[combined.family == 'LSH']
+            nb = int(lsh_sub.sort_values(['recall_100', 'qps'], ascending=[False, False]).iloc[0]['nbits'])
+            cfg = dict(nbits=nb)
+        configs.append((fam, cfg))
+    print('scaling configs (all families in combined):', configs)
 
-def build_search(family, cfg, n, q, k=100):
-    if family == 'IVFFlat':
-        quant = faiss.IndexFlatL2(DIM)
-        idx = faiss.IndexIVFFlat(quant, DIM, cfg['nlist'])
-    elif family == 'IVFPQ':
-        quant = faiss.IndexFlatL2(DIM)
-        idx = faiss.IndexIVFPQ(quant, DIM, cfg['nlist'], cfg['M'], 8)
-    elif family == 'IVFSQ':
-        quant = faiss.IndexFlatL2(DIM)
-        idx = faiss.IndexIVFScalarQuantizer(quant, DIM, cfg['nlist'], faiss.ScalarQuantizer.QT_8bit)
-    elif family == 'HNSW':
-        idx = faiss.IndexHNSWFlat(DIM, cfg['M'])
-        idx.hnsw.efConstruction = cfg['efC']
-    elif family == 'LSH':
-        idx = faiss.IndexLSH(DIM, cfg['nbits'])
-    else:
-        return None
+    def build_search(family, cfg, n, q, k=100):
+        if family == 'IVFFlat':
+            quant = faiss.IndexFlatL2(DIM)
+            idx = faiss.IndexIVFFlat(quant, DIM, cfg['nlist'])
+        elif family == 'IVFPQ':
+            quant = faiss.IndexFlatL2(DIM)
+            idx = faiss.IndexIVFPQ(quant, DIM, cfg['nlist'], cfg['M'], 8)
+        elif family == 'IVFSQ':
+            quant = faiss.IndexFlatL2(DIM)
+            idx = faiss.IndexIVFScalarQuantizer(quant, DIM, cfg['nlist'], faiss.ScalarQuantizer.QT_8bit)
+        elif family == 'HNSW':
+            idx = faiss.IndexHNSWFlat(DIM, cfg['M'])
+            idx.hnsw.efConstruction = cfg['efC']
+        elif family == 'LSH':
+            idx = faiss.IndexLSH(DIM, cfg['nbits'])
+        else:
+            return None
 
-    with utils.timed(f'{family} build', sample_rss_peak=True) as tb:
-        if hasattr(idx, 'is_trained') and not idx.is_trained:
-            train_x = utils.load_train_subset(BASE_PATH, min(n, 200_000))
-            idx.train(train_x)
-            del train_x; gc.collect()
-        utils.stream_add(idx, BASE_PATH, n)
-    if 'nprobe' in cfg:
-        idx.nprobe = cfg['nprobe']
-    if family == 'HNSW':
-        idx.hnsw.efSearch = cfg['efS']
-    size_mb = utils.index_size_mb(idx)
-    rss_peak_mb = tb.rss_peak_mb
-    rss_mb = rss_peak_mb
-    qps, lat_ms, I = utils.measure_qps(
-        lambda q2, k2: idx.search(q2, k2), q, k,
-        repeat=QPS_REPEAT, warmup=QPS_WARMUP,
-    )
-    del idx
-    gc.collect()
-    return tb.elapsed, size_mb, rss_mb, rss_peak_mb, qps, lat_ms, I
-
-for n in SCALES:
-    print(f'\\n=== n={n:,} ===')
-    gt_loc = ensure_gt(n)
-    utils.print_mem(f'before configs at n={n}')
-    for fam, cfg in configs:
-        try:
-            t_build, size_mb, rss_mb, rss_peak_mb, qps, lat_ms, I = build_search(fam, cfg, n, queries)
-            recalls = utils.compute_recalls(I, gt_loc, (1, 10, 100))
-            scale_rows.append(dict(family=fam, n=n, config=str(cfg),
-                                    build_s=t_build, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
-                                    qps=qps, latency_ms=lat_ms,
-                                    recall_1=recalls[1], recall_10=recalls[10], recall_100=recalls[100]))
-            print(f'   {fam:8} n={n:>8,}  build={t_build:6.1f}s  size={size_mb:6.0f}MB  peakRSS={rss_peak_mb:6.0f}MB  '
-                  f'qps={qps:7.1f}  R@100={recalls[100]:.3f}')
-        except Exception as e:
-            print(f'   {fam:8} n={n:>8,}  FAILED: {e}')
+        with utils.timed(f'{family} build', sample_rss_peak=True) as tb:
+            if hasattr(idx, 'is_trained') and not idx.is_trained:
+                train_x = utils.load_train_subset(BASE_PATH, min(n, 200_000))
+                idx.train(train_x)
+                del train_x; gc.collect()
+            utils.stream_add(idx, BASE_PATH, n)
+        if 'nprobe' in cfg:
+            idx.nprobe = cfg['nprobe']
+        if family == 'HNSW':
+            idx.hnsw.efSearch = cfg['efS']
+        size_mb = utils.index_size_mb(idx)
+        rss_mb = tb.rss_after_mb
+        rss_peak_mb = tb.rss_peak_mb
+        rss_delta_mb = tb.rss_delta_mb
+        qps, lat_ms, lat_p99_ms, I = utils.measure_qps(
+            lambda q2, k2: idx.search(q2, k2), q, k,
+            repeat=QPS_REPEAT, warmup=QPS_WARMUP,
+        )
+        del idx
         gc.collect()
-    gc.collect()
+        return tb.elapsed, size_mb, rss_mb, rss_peak_mb, rss_delta_mb, qps, lat_ms, lat_p99_ms, I
 
-df_scale = pd.DataFrame(scale_rows); df_scale.to_csv(RESULTS / 'scaling.csv', index=False)
+    for n in SCALES:
+        print()
+        print(f'=== n={n:,} ===')
+        gt_loc = ensure_gt(n)
+        utils.print_mem(f'before configs at n={n}')
+        for fam, cfg in configs:
+            try:
+                t_build, size_mb, rss_mb, rss_peak_mb, rss_delta_mb, qps, lat_ms, lat_p99_ms, I = build_search(fam, cfg, n, queries)
+                recalls = utils.compute_recalls(I, gt_loc, (1, 10, 100))
+                scale_rows.append(dict(family=fam, n=n, config=str(cfg),
+                                        build_s=t_build, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
+                                        rss_delta_mb=rss_delta_mb, qps=qps, latency_ms=lat_ms, latency_p99_ms=lat_p99_ms,
+                                        recall_1=recalls[1], recall_10=recalls[10], recall_100=recalls[100]))
+                print(f'   {fam:8} n={n:>8,}  build={t_build:6.1f}s  size={size_mb:6.0f}MB  peakRSS={rss_peak_mb:6.0f}MB  '
+                      f'qps={qps:7.1f}  R@100={recalls[100]:.3f}')
+            except Exception as e:
+                print(f'   {fam:8} n={n:>8,}  FAILED: {e}')
+            gc.collect()
+        gc.collect()
+
+    df_scale = pd.DataFrame(scale_rows)
+    df_scale.to_csv(_scale_csv, index=False)
 display(df_scale)
 """),
     md("""
@@ -1591,9 +1676,10 @@ else:
         axes[0,0].plot(sub.n, sub.recall_100, marker='o', label=fam)
         axes[0,1].plot(sub.n, sub.qps, marker='o', label=fam)
         axes[1,0].plot(sub.n, sub.build_s, marker='o', label=fam)
-        axes[1,1].plot(sub.n, sub[rss_col] / 1024, marker='o', label=fam)
+        axes[1,1].plot(sub.n, sub[rss_col] / 1024, marker='o', label=fam)  # MB → GB
     axes[0,0].set_title('Recall@100 vs dataset size')
-    axes[0,0].set_xlabel('n_base'); axes[0,0].set_ylabel('Recall@100'); axes[0,0].set_ylim(0, 1.02)
+    axes[0,0].set_xlabel('n_base'); axes[0,0].set_ylabel('Recall@100'); axes[0,0].set_ylim(0.4, 1.02)
+    axes[0,0].set_xlim(left=min(df_scale['n'].min(), 80_000), right=max(df_scale['n'].max(), N_BASE * 0.99))
     axes[0,1].set_title('QPS vs dataset size')
     axes[0,1].set_xlabel('n_base'); axes[0,1].set_ylabel('QPS (log)'); axes[0,1].set_yscale('log')
     axes[1,0].set_title('Build time vs dataset size')
@@ -1613,80 +1699,88 @@ Below we look for surprises in the data — cases where empirical measurements c
 naive expectations.  For each, we either explain the cause or flag it.
 """),
     code(r"""
-print('=== ANOMALY CHECKLIST ===\\n')
+print('=== ANOMALY CHECKLIST ===')
+print()
 
-# A) Does IVFFlat ever lose recall at higher nprobe?
+anomaly_flags = []
 ivf = frames['IVF_all']
+hnsw = frames['HNSW_all']
+lsh = frames['LSH']
+
+# A) IVFFlat recall monotone in nprobe
 if ivf is not None:
-    flat_ivf = ivf[ivf.algo == 'IVFFlat'].sort_values(['nlist','nprobe'])
+    flat_ivf = ivf[ivf.algo == 'IVFFlat'].sort_values(['nlist', 'nprobe'])
     for nl, sub in flat_ivf.groupby('nlist'):
         r = sub.recall_100.values
-        non_monotonic = np.any(np.diff(r) < -0.01)
-        print(f'[A] IVFFlat nlist={nl:5}  recall monotone in nprobe: {not non_monotonic}')
+        if np.any(np.diff(r) < -0.01):
+            anomaly_flags.append(f'[A] IVFFlat nlist={nl}: recall drops with higher nprobe')
+        print(f'[A] IVFFlat nlist={nl:5}  recall monotone in nprobe: {not np.any(np.diff(r) < -0.01)}')
 
-# B) HNSW saturation point
-hnsw = frames['HNSW_all']
+# B) HNSW saturation + efC non-monotonicity at low efSearch
 if hnsw is not None:
-    sat = (hnsw.groupby('M').recall_100.max()
-           .reset_index().rename(columns={'recall_100':'max_R@100'}))
-    print('\\n[B] HNSW Recall@100 saturation per M:')
+    sat = hnsw.groupby('M').recall_100.max().reset_index()
+    print()
+    print('[B] HNSW max Recall@100 per M:')
     print(sat.to_string(index=False))
-    if sat['max_R@100'].max() < 0.95:
-        print('  WARNING: HNSW never reached 0.95 — efC or efSearch grid too small?')
+    for efs in sorted(hnsw.efSearch.unique())[:3]:
+        sub = hnsw[hnsw.efSearch == efs].groupby('efConstruction').recall_100.max()
+        if len(sub) >= 2 and sub.iloc[-1] < sub.iloc[0] - 0.05:
+            anomaly_flags.append(
+                f'[B] HNSW at efSearch={efs}: higher efC lowers max R@100 (looser graph effect)')
 
-# C) LSH absolute recall at largest nbits
-lsh = frames['LSH']
+# C) LSH recall ceiling
 if lsh is not None:
     r_max = lsh.recall_100.max()
-    print(f'\\n[C] LSH best Recall@100 at any nbits = {r_max:.3f}')
-    if r_max < 0.5:
-        print(f'  → as expected at dim={DIM}: curse of dimensionality limits LSH severely.')
-        print('    Random hyperplanes need O(d) bits per quantile of cosine resolution → '
-              'much more than 4096 bits would be required for high recall.')
+    print()
+    print(f'[C] LSH best Recall@100 = {r_max:.3f} (expect low at dim={DIM})')
 
-# D) IVF+PQ size vs recall trade-off
+# D) IVF+PQ build time vs M (non-monotonic → timing noise if QPS_REPEAT=1)
 if ivf is not None and (ivf.algo == 'IVFPQ').any():
     pq = ivf[ivf.algo == 'IVFPQ']
-    print('\\n[D] IVF+PQ size / recall headline:')
-    for M, sub in pq.groupby('M'):
-        best = sub.sort_values('recall_100', ascending=False).iloc[0]
-        print(f'   PQ M={M:3}  size={best.size_mb:6.1f}MB  best R@100={best.recall_100:.3f}')
+    print()
+    print('[D] IVF+PQ build_s per (nlist, M) — first row each:')
+    for (nl, M), sub in pq.groupby(['nlist', 'M']):
+        b = sub.drop_duplicates('M')['build_s'].iloc[0]
+        print(f'   nlist={int(nl):5} M={int(M):3}  build_s={b:6.1f}s')
+    for nl, sub in pq.groupby('nlist'):
+        bt = sub.groupby('M').build_s.first()
+        if len(bt) >= 2 and (bt.diff().dropna() < -5).any():
+            anomaly_flags.append(f'[D] IVFPQ nlist={nl}: build_s non-monotonic in M (check QPS_REPEAT/warmup)')
 
-# E) Scaling: index size vs sampled peak RSS (non-monotonic jumps)
-anomaly_flags = []
-if 'df_scale' in dir() and len(df_scale) > 0:
-    rss_c = 'rss_peak_mb' if 'rss_peak_mb' in df_scale.columns else 'rss_mb'
-    for fam, sub in df_scale.groupby('family'):
-        sub = sub.sort_values('n')
-        if len(sub) < 2:
-            continue
-        sz = sub['size_mb'].to_numpy()
-        rss = sub[rss_c].to_numpy()
-        for i in range(len(sub) - 1):
-            if sz[i + 1] > sz[i] * 1.4 and rss[i + 1] < rss[i] * 0.88:
-                msg = (f"[E] {fam}: RSS fell while index grew "
-                       f"(n={int(sub['n'].iloc[i])}→{int(sub['n'].iloc[i+1])}, "
-                       f"size {sz[i]:.0f}→{sz[i+1]:.0f} MB, RSS {rss[i]:.0f}→{rss[i+1]:.0f} MB)")
-                print(msg)
-                anomaly_flags.append(msg)
+# E) rss_mb must differ from rss_peak_mb when peak tracks mmap
+if ivf is not None and 'rss_delta_mb' in ivf.columns:
+    same = (ivf['rss_mb'] == ivf['rss_peak_mb']).all() if 'rss_peak_mb' in ivf.columns else False
+    print()
+    print(f'[E] rss_mb == rss_peak_mb for all IVF rows: {same} (should be False after fix)')
+    if same:
+        anomaly_flags.append('[E] rss_mb still aliased to peak — RSS columns degenerate')
 
-# F) Every family from sweeps appears in best_configs
-miss = set(combined['family'].unique()) - set(summary['family'].values)
-if miss:
-    msg = f'[F] families missing from best_configs: {sorted(miss)}'
-    print('\\n' + msg)
-    anomaly_flags.append(msg)
-else:
-    print('\\n[F] best_configs covers all families in combined ✓')
-
-# G) IVFFlat grid should never log nprobe > nlist
+# F) First IVFFlat config QPS cold-start (lowest nlist, nprobe=1)
 if ivf is not None:
     flat_ivf = ivf[ivf.algo == 'IVFFlat']
-    bad = flat_ivf[flat_ivf['nprobe'] > flat_ivf['nlist']]
-    print(f'\\n[G] IVFFlat rows with nprobe>nlist (must be 0): {len(bad)}')
+    cold = flat_ivf[(flat_ivf.nlist == flat_ivf.nlist.min()) & (flat_ivf.nprobe == 1)]
+    hot = flat_ivf[(flat_ivf.nlist == flat_ivf.nlist.max()) & (flat_ivf.nprobe == 1)]
+    if len(cold) and len(hot) and cold.qps.iloc[0] < hot.qps.iloc[0] * 0.15:
+        anomaly_flags.append('[F] IVFFlat nprobe=1 QPS cold-start on smallest nlist (use QPS_WARMUP>=1)')
 
-# Summary chart of flags
+# G) best_configs coverage
+miss = set(combined['family'].unique()) - set(summary['family'].values)
+print()
+if miss:
+    anomaly_flags.append(f'[G] families missing from best_configs: {sorted(miss)}')
+else:
+    print('[G] best_configs covers all families ✓')
+
+# H) IVFFlat invalid nprobe
+if ivf is not None:
+    bad = ivf[(ivf.algo == 'IVFFlat') & (ivf.nprobe > ivf.nlist)]
+    print(f'[H] IVFFlat nprobe>nlist rows: {len(bad)}')
+
 if anomaly_flags:
+    print()
+    print('Flags:')
+    for msg in anomaly_flags:
+        print(' ', msg)
     fig, ax = plt.subplots(figsize=(9, max(2.5, 0.38 * len(anomaly_flags))))
     y = np.arange(len(anomaly_flags))
     ax.barh(y, np.ones(len(anomaly_flags)), color='coral', height=0.65)
@@ -1699,56 +1793,55 @@ if anomaly_flags:
     plt.savefig(DOCS_IMG / '05_anomaly_flags.png', dpi=120, bbox_inches='tight')
     plt.show()
 else:
-    print('\\nNo automated anomaly flags (scaling RSS / family coverage).')
+    print()
+    print('No automated anomaly flags.')
 """),
     md("""
-## 6 · Final pick
+## 6 · Final pick (one row per family from §2)
 
-We rank the families on three normalised criteria:
-
-* **recall** — max Recall@100 achieved (any config)
-* **speed** — QPS at the *highest* recall ≥ 0.9 (proxy for "useful regime")
-* **footprint** — index size at best speed config (smaller = better)
-
-Each is min-max normalised; the family with the highest sum wins.
+Quadrant winners use the **same** `best_configs` row for recall, QPS, and size — avoids
+mixing metrics from different sweep points.
 """),
     code(r"""
-ranks = []
-for fam, sub in combined.groupby('family'):
-    r_max = sub.recall_100.max()
-    best_useful = sub[sub.recall_100 >= 0.9].sort_values('qps', ascending=False)
-    if best_useful.empty:
-        best_useful = sub.sort_values('recall_100', ascending=False).head(1)
-    qps_useful = best_useful.iloc[0].qps
-    size_min = sub.size_mb.min()
-    ranks.append(dict(family=fam, recall=r_max, qps_at_0p9=qps_useful, size_min_mb=size_min))
+pick = summary.set_index('family')
+display(pick[['recall_100', 'qps', 'size_mb', 'build_s', 'latency_ms', 'latency_p99_ms', 'config']])
 
-ranking = pd.DataFrame(ranks).set_index('family')
-norm = ranking.copy()
-norm['recall_n'] = (norm.recall - norm.recall.min()) / (norm.recall.max() - norm.recall.min() + 1e-9)
-norm['speed_n']  = (norm.qps_at_0p9 - norm.qps_at_0p9.min()) / (norm.qps_at_0p9.max() - norm.qps_at_0p9.min() + 1e-9)
-norm['size_n']   = 1 - (norm.size_min_mb - norm.size_min_mb.min()) / (norm.size_min_mb.max() - norm.size_min_mb.min() + 1e-9)
-norm['score']    = norm[['recall_n', 'speed_n', 'size_n']].sum(axis=1)
-display(norm.sort_values('score', ascending=False))
+print()
+print('>>> Quadrant winners (from best_configs picks):')
+print(f"    Highest recall@100: {pick['recall_100'].idxmax()}  ({pick['recall_100'].max():.3f})")
+print(f"    Highest QPS at pick: {pick['qps'].idxmax()}  ({pick['qps'].max():.0f})")
+print(f"    Smallest index at pick: {pick['size_mb'].idxmin()}  ({pick['size_mb'].min():.1f} MB)")
+"""),
+    md("""
+## 7 · Flame graph (optional)
 
-winner = norm.score.idxmax()
-print(f'\\n>>> Winner overall: {winner}  (score={norm.loc[winner,"score"]:.3f})')
+Run after benchmarks to profile HNSW build vs IVFFlat (see `scripts/record_flame.sh`).
+"""),
+    code(r"""
+_flame = DOCS_IMG / 'hnsw_build_flame.svg'
+if _flame.exists():
+    from IPython.display import SVG
+    display(SVG(_flame.read_text()))
+    print('Embedded:', _flame)
+else:
+    print('No flame graph yet. Generate with:')
+    print('  LAB_N_SWEEP=1000000 ./scripts/record_flame.sh')
+    print('(writes docs/img/full/hnsw_build_flame.svg — requires py-spy in .venv)')
 """),
     md("""
 ## Conclusion
 
-The detailed analysis above is in the rendered notebook.  The headline finding (overwritten
-on actual run):
+Headline findings (see rendered cells for numbers from this run):
 
-* **HNSW** dominates the high-recall regime when build time and RAM aren't constrained.
-* **IVF+PQ** wins on footprint by a huge margin while still reaching usable recall at high
-  nprobe.
-* **LSH** is fast but suffers severely at 2048 D — best left as a coarse pre-filter.
-* **IVFFlat** is the simplest baseline and competitive for moderate recall targets when
-  RAM is plentiful.
+* **HNSW** — best recall–QPS trade-off at high `efSearch`; build/RSS grow with `N`.
+* **IVF+PQ** — smallest on-disk index; needs high `nprobe`; sweep spans **nlist × M**.
+* **IVFFlat** — simple baseline; build time grows ~linearly with `nlist` (see log-scale bar).
+* **LSH** — fast but low recall at 2048 D; higher `nbits` monotonically helps.
 
-The scaling plots verify that the chosen best configurations stay within the 28 GB RAM
-target on the full 1.28 M base.
+**Methodology notes:** `rss_peak_mb` includes mmap page-cache during `stream_add`, not
+index size alone. Use `rss_mb` (after build) and `rss_delta_mb` for process growth.
+Scaling default stops at 1M vectors; set `LAB_SCALING_FULL=1` to measure the full
+1.28M base against the 28 GB target.
 """),
 ]
 write(nb5, '05_comparison.ipynb')

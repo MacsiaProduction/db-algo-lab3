@@ -253,6 +253,10 @@ class TimedBlock:
         return (self.rss_after - self.rss_before) / 1024 / 1024
 
     @property
+    def rss_after_mb(self) -> float:
+        return self.rss_after / 1024 / 1024
+
+    @property
     def rss_peak_mb(self) -> float:
         return self.rss_peak / 1024 / 1024
 
@@ -288,10 +292,11 @@ def timed(
 
 
 def measure_qps(search_fn, queries: np.ndarray, k: int, repeat: int = 3,
-                warmup: int = 1) -> tuple[float, float, np.ndarray]:
+                warmup: int = 1) -> tuple[float, float, float, np.ndarray]:
     """Run search_fn(queries, k) -> (D, I) `repeat` times after `warmup` runs.
 
-    Returns (median_qps, mean_latency_ms, last_I).
+    Returns (median_qps, mean_latency_ms, p99_latency_ms, last_I).
+    Latencies are per-query ms derived from whole-batch timings.
     """
     for _ in range(warmup):
         D, I = search_fn(queries, k)
@@ -303,8 +308,17 @@ def measure_qps(search_fn, queries: np.ndarray, k: int, repeat: int = 3,
     times.sort()
     median = times[len(times) // 2]
     qps = queries.shape[0] / median
-    mean_lat = (sum(times) / len(times)) * 1000.0 / queries.shape[0]
-    return qps, mean_lat, I
+    nq = max(1, queries.shape[0])
+    per_q_ms = [t * 1000.0 / nq for t in times]
+    mean_lat = sum(per_q_ms) / len(per_q_ms)
+    p99_lat = float(np.percentile(per_q_ms, 99))
+    return qps, mean_lat, p99_lat, I
+
+
+def bench_meta() -> dict:
+    """Run metadata stamped into each benchmark row."""
+    import faiss
+    return dict(faiss_threads=int(faiss.omp_get_max_threads()))
 
 
 # ---------------------------------------------------------------------------

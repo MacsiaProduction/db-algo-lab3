@@ -1,0 +1,2 @@
+flame-only run LAB_N_SWEEP=1000000 LAB_LIGHT=0
+output=docs/img/full/hnsw_build_flame.svg
