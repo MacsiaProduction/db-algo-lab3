@@ -38,6 +38,23 @@ Run notebooks in order (or use the scripts above):
 4. `04_lsh_benchmark.ipynb` — random-projection LSH `nbits` sweep.
 5. `05_comparison.ipynb` — cross-algorithm Pareto, scaling, anomaly analysis, final pick.
 
+After the notebooks finish, generate the consolidated review:
+
+```bash
+python3 scripts/analyze_and_report.py --run full              # default
+python3 scripts/analyze_and_report.py --run full --english    # also emit REPORT_*.md
+```
+
+It reads `results/{run}/*.csv`, refreshes the cross-algorithm / memory-budget /
+anomaly / cross-CSV-consistency charts under `docs/img/{run}/`, writes derived
+stats next to the CSVs and emits two Russian reports:
+
+- `docs/OTCHET_polnyj_{run}.md` — подробный (draft, full explanations + proofs)
+- `docs/OTCHET_kratkij_{run}.md` — краткий (same charts + tables, minimal prose)
+
+Pass `--english` to additionally generate the legacy English `REPORT_{run}.md`.
+Independent of FAISS — runs in seconds.
+
 ## Dataset
 
 - **Source:** http://www.cad.zju.edu.cn/home/dengcai/Data/ANNS/ANNSData.html

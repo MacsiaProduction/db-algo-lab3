@@ -82,6 +82,8 @@ else:
     rows = []
     quant = faiss.IndexFlatL2(DIM)
     idx = faiss.IndexIVFPQ(quant, DIM, {nlist}, int({m}), int(PQ_NBITS))
+    idx.cp.min_points_per_centroid = 5
+    idx.cp.max_points_per_centroid = max(256, len(train_x) // {nlist})
     with utils.timed('train+add PQ nlist={nlist} M={m}', sample_rss_peak=True) as tb:
         idx.train(train_x)
         utils.stream_add(idx, BASE_PATH, N_SWEEP)
@@ -111,24 +113,26 @@ else:
 """.strip()
 
 
-def _ivfsq_name_cell(name: str, qt_expr: str) -> str:
+def _ivfsq_nlist_name_cell(nlist: int, name: str, qt_expr: str) -> str:
     return f"""
-if '{name}' not in [t[0] for t in SQ_TYPES]:
-    print('skip IVFSQ {name}')
+if '{name}' not in [t[0] for t in SQ_TYPES] or {nlist} not in SQ_NLIST_GRID:
+    print('skip IVFSQ {name} nlist={nlist}')
 else:
     rows = []
     quant = faiss.IndexFlatL2(DIM)
-    idx = faiss.IndexIVFScalarQuantizer(quant, DIM, best_nlist, {qt_expr}, faiss.METRIC_L2)
-    with utils.timed('train+add SQ {name}', sample_rss_peak=True) as tb:
+    idx = faiss.IndexIVFScalarQuantizer(quant, DIM, {nlist}, {qt_expr}, faiss.METRIC_L2)
+    idx.cp.min_points_per_centroid = 5
+    idx.cp.max_points_per_centroid = max(256, len(train_x) // {nlist})
+    with utils.timed('train+add SQ {name} nlist={nlist}', sample_rss_peak=True) as tb:
         idx.train(train_x)
         utils.stream_add(idx, BASE_PATH, N_SWEEP)
     size_mb = utils.index_size_mb(idx)
     rss_mb = tb.rss_after_mb
     rss_peak_mb = tb.rss_peak_mb
     rss_delta_mb = tb.rss_delta_mb
-    print(f'[SQ {name}]  build {{tb.elapsed:5.1f}}s · size {{size_mb:7.1f}} MB')
+    print(f'[SQ {name} nlist={{{nlist}:5}}]  build {{tb.elapsed:6.1f}}s · size {{size_mb:7.1f}} MB')
     for nprobe in NPROBE_GRID:
-        if nprobe > best_nlist:
+        if nprobe > {nlist}:
             continue
         idx.nprobe = nprobe
         qps, lat_ms, lat_p99_ms, I = utils.measure_qps(
@@ -136,7 +140,7 @@ else:
             repeat=QPS_REPEAT, warmup=QPS_WARMUP,
         )
         recalls = utils.compute_recalls(I, gt_local[:QUERY_N], (1, 10, 100))
-        rows.append(dict(algo='IVFSQ', sq='{name}', nlist=best_nlist, nprobe=nprobe,
+        rows.append(dict(algo='IVFSQ', sq='{name}', nlist={nlist}, nprobe=nprobe,
                         build_s=tb.elapsed, size_mb=size_mb, rss_mb=rss_mb, rss_peak_mb=rss_peak_mb,
                         rss_delta_mb=rss_delta_mb, **utils.bench_meta(),
                         qps=qps, latency_ms=lat_ms, latency_p99_ms=lat_p99_ms,
@@ -657,12 +661,13 @@ display(df_pq.tail(6))
 """))
 
 _ivfsq_sweep = []
-for _sq_name, _sq_qt in [
-    ("SQ8", "faiss.ScalarQuantizer.QT_8bit"),
-    ("SQ4", "faiss.ScalarQuantizer.QT_4bit"),
-]:
-    _ivfsq_sweep.append(md(f"#### IVF+SQ — {_sq_name}"))
-    _ivfsq_sweep.append(code(_ivfsq_name_cell(_sq_name, _sq_qt)))
+for _nl in [256, 1024, 4096]:
+    for _sq_name, _sq_qt in [
+        ("SQ8", "faiss.ScalarQuantizer.QT_8bit"),
+        ("SQ4", "faiss.ScalarQuantizer.QT_4bit"),
+    ]:
+        _ivfsq_sweep.append(md(f"#### IVF+SQ — nlist={_nl} · {_sq_name}"))
+        _ivfsq_sweep.append(code(_ivfsq_nlist_name_cell(_nl, _sq_name, _sq_qt)))
 _ivfsq_sweep.append(code(r"""
 df_sq = pd.read_csv(IVF_SQ_PATH)
 display(df_sq)
@@ -705,6 +710,7 @@ SQ_TYPES = [
     ('SQ8',  faiss.ScalarQuantizer.QT_8bit),
     ('SQ4',  faiss.ScalarQuantizer.QT_4bit),
 ]
+SQ_NLIST_GRID = [256, 1024, 4096]
 
 # Number of vectors used for IVF training (k-means).  ≥ 30 * nlist recommended.
 TRAIN_N = max(200_000, 30 * max(NLIST_GRID))
@@ -718,6 +724,7 @@ if LAB_LIGHT:
     PQ_NLIST_GRID = [256, 1024]
     PQ_M_GRID = [32, 64]
     SQ_TYPES = [('SQ8', faiss.ScalarQuantizer.QT_8bit)]
+    SQ_NLIST_GRID = [256, 1024]
 
 QPS_REPEAT = int(os.environ.get('LAB_QPS_REPEAT', '2' if LAB_LIGHT else '1'))
 QPS_WARMUP = int(os.environ.get('LAB_QPS_WARMUP', '1' if LAB_LIGHT else '0'))
@@ -861,11 +868,12 @@ IVF_PQ_PATH = RESULTS / 'ivf_pq.csv'
 utils.init_results_csv(IVF_PQ_PATH)
 print('IVFPQ checkpoint:', IVF_PQ_PATH)
 
-# SQ still uses the IVFFlat winner as coarse quantiser.
+# SQ sweep is now multi-nlist (SQ_NLIST_GRID); keep best_nlist as the *reference*
+# IVFFlat point used in cross-family Pareto overlays only.
 best_nlist = int((df_ivf
               .groupby('nlist')['recall_100'].max()
               .idxmax()))
-print(f'using nlist={best_nlist} for IVF+SQ only')
+print(f'reference IVFFlat nlist for plots: {best_nlist}  ·  SQ_NLIST_GRID={SQ_NLIST_GRID}')
 """),
     *_ivfpq_sweep,
     md("""
@@ -1582,15 +1590,20 @@ else:
     print('scaling configs (all families in combined):', configs)
 
     def build_search(family, cfg, n, q, k=100):
+        # Match the per-notebook IVF clustering parameters so build_s / RSS
+        # in scaling.csv stay comparable to the per-family CSVs.
         if family == 'IVFFlat':
             quant = faiss.IndexFlatL2(DIM)
             idx = faiss.IndexIVFFlat(quant, DIM, cfg['nlist'])
+            idx.cp.min_points_per_centroid = 5
         elif family == 'IVFPQ':
             quant = faiss.IndexFlatL2(DIM)
             idx = faiss.IndexIVFPQ(quant, DIM, cfg['nlist'], cfg['M'], 8)
+            idx.cp.min_points_per_centroid = 5
         elif family == 'IVFSQ':
             quant = faiss.IndexFlatL2(DIM)
             idx = faiss.IndexIVFScalarQuantizer(quant, DIM, cfg['nlist'], faiss.ScalarQuantizer.QT_8bit)
+            idx.cp.min_points_per_centroid = 5
         elif family == 'HNSW':
             idx = faiss.IndexHNSWFlat(DIM, cfg['M'])
             idx.hnsw.efConstruction = cfg['efC']
@@ -1599,9 +1612,15 @@ else:
         else:
             return None
 
+        # Use the same train slice the per-notebook sweeps use (200 000).
+        TRAIN_N_SCALING = 200_000
         with utils.timed(f'{family} build', sample_rss_peak=True) as tb:
             if hasattr(idx, 'is_trained') and not idx.is_trained:
-                train_x = utils.load_train_subset(BASE_PATH, min(n, 200_000))
+                train_x = utils.load_train_subset(BASE_PATH, min(n, TRAIN_N_SCALING))
+                # Match cp.max_points_per_centroid override too.
+                if family.startswith('IVF') and hasattr(idx, 'cp'):
+                    idx.cp.max_points_per_centroid = max(
+                        256, len(train_x) // max(1, cfg.get('nlist', 1)))
                 idx.train(train_x)
                 del train_x; gc.collect()
             utils.stream_add(idx, BASE_PATH, n)
@@ -1834,14 +1853,28 @@ else:
 Headline findings (see rendered cells for numbers from this run):
 
 * **HNSW** — best recall–QPS trade-off at high `efSearch`; build/RSS grow with `N`.
-* **IVF+PQ** — smallest on-disk index; needs high `nprobe`; sweep spans **nlist × M**.
+* **IVF+PQ** — smallest on-disk index; recall ceiling ≈ 0.77 even at M=128 at 2048 D.
+* **IVFSQ-8** — compressed (~4× vs IVFFlat raw) and keeps R@100 ≥ 0.98; QPS bottleneck is decode-in-distance.
 * **IVFFlat** — simple baseline; build time grows ~linearly with `nlist` (see log-scale bar).
-* **LSH** — fast but low recall at 2048 D; higher `nbits` monotonically helps.
+* **LSH** — fast but low recall at 2048 D; even nbits=4096 only reaches R@100 ≈ 0.39.
 
 **Methodology notes:** `rss_peak_mb` includes mmap page-cache during `stream_add`, not
 index size alone. Use `rss_mb` (after build) and `rss_delta_mb` for process growth.
+`latency_p99_ms` is computed across `QPS_REPEAT` batch retimings, not across individual
+queries — it equals the mean when `QPS_REPEAT=1` (the full-mode default).
 Scaling default stops at 1M vectors; set `LAB_SCALING_FULL=1` to measure the full
 1.28M base against the 28 GB target.
+
+### Polished report
+After this notebook runs, generate the consolidated review with cleaner Pareto/budget
+charts and a quantitative anomaly table:
+
+```bash
+python3 scripts/analyze_and_report.py --run full
+```
+
+It writes `docs/REPORT_full.md` plus `report_*.png`-style charts under
+`docs/img/full/` without touching the per-notebook outputs.
 """),
 ]
 write(nb5, '05_comparison.ipynb')

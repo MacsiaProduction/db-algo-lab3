@@ -1,0 +1,72 @@
+[
+  {
+    "key": "IVFPQ nlist=256 build_s non-monotonic in M",
+    "detail": "M=32\u219232.5s; M=64\u219212.5s",
+    "severity": "low"
+  },
+  {
+    "key": "HNSW efC monotonicity violated at efS=10",
+    "detail": "efC=40\u2192R@100=0.712; efC=100\u2192R@100=0.530; efC=200\u2192R@100=0.562",
+    "severity": "medium"
+  },
+  {
+    "key": "HNSW efC monotonicity violated at efS=20",
+    "detail": "efC=40\u2192R@100=0.835; efC=100\u2192R@100=0.695; efC=200\u2192R@100=0.730",
+    "severity": "medium"
+  },
+  {
+    "key": "ivf_flat: rss_mb still aliased to rss_peak_mb",
+    "detail": "post-fix invariant broken \u2014 RSS columns degenerate",
+    "severity": "high"
+  },
+  {
+    "key": "ivf_pq: rss_mb still aliased to rss_peak_mb",
+    "detail": "post-fix invariant broken \u2014 RSS columns degenerate",
+    "severity": "high"
+  },
+  {
+    "key": "ivf_sq: rss_mb still aliased to rss_peak_mb",
+    "detail": "post-fix invariant broken \u2014 RSS columns degenerate",
+    "severity": "high"
+  },
+  {
+    "key": "hnsw_M: rss_mb still aliased to rss_peak_mb",
+    "detail": "post-fix invariant broken \u2014 RSS columns degenerate",
+    "severity": "high"
+  },
+  {
+    "key": "hnsw_EFC: rss_mb still aliased to rss_peak_mb",
+    "detail": "post-fix invariant broken \u2014 RSS columns degenerate",
+    "severity": "high"
+  },
+  {
+    "key": "lsh: rss_mb still aliased to rss_peak_mb",
+    "detail": "post-fix invariant broken \u2014 RSS columns degenerate",
+    "severity": "high"
+  },
+  {
+    "key": "IVFPQ max R@100 = 0.674 \u2014 ceiling at this dim",
+    "detail": "best PQ config (nlist=256, M=64, nprobe=256) cannot serve \u2265 0.95 SLA",
+    "severity": "medium"
+  },
+  {
+    "key": "IVFFlat: build_s mismatch scaling vs sweep (37 %)",
+    "detail": "scaling.csv=5s, ivfflat_*.csv=8s for identical config; QPS gap 289 %",
+    "severity": "medium"
+  },
+  {
+    "key": "IVFPQ: build_s mismatch scaling vs sweep (29 %)",
+    "detail": "scaling.csv=9s, ivfpq_*.csv=12s for identical config; QPS gap 90 %",
+    "severity": "medium"
+  },
+  {
+    "key": "HNSW: build_s mismatch scaling vs sweep (69 %)",
+    "detail": "scaling.csv=4s, hnsw_*.csv=12s for identical config; QPS gap 99 %",
+    "severity": "medium"
+  },
+  {
+    "key": "LSH: build_s mismatch scaling vs sweep (50 %)",
+    "detail": "scaling.csv=2s, lsh_*.csv=3s for identical config; QPS gap 60 %",
+    "severity": "medium"
+  }
+]
