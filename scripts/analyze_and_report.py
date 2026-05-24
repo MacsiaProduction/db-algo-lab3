@@ -1777,7 +1777,19 @@ def write_report_ru(
     ops = summary[summary.threshold > 0].copy().set_index("family")
     knees = summary[summary.threshold == -1.0].set_index("family")
     scaling = frames.get("scaling")
-    n_base = int(scaling["n"].max()) if scaling is not None and len(scaling) else None
+    # n_base for the sweep CSVs (drives §2 and §3). Fall back to scaling max
+    # if sweep CSVs don't carry n_base for some reason.
+    def _sweep_n_base() -> Optional[int]:
+        for key in ("ivf_flat", "ivf_pq", "ivf_sq", "hnsw_M", "lsh"):
+            df = frames.get(key)
+            if df is not None and "n_base" in df.columns and len(df):
+                return int(df["n_base"].iloc[0])
+        return None
+    n_base = _sweep_n_base()
+    if n_base is None and scaling is not None and len(scaling):
+        n_base = int(scaling["n"].max())
+    scaling_n_max = (int(scaling["n"].max())
+                     if scaling is not None and len(scaling) else None)
     combined = combined_frame(frames)
 
     L: List[str] = []
@@ -1813,8 +1825,13 @@ def write_report_ru(
     host = _host_info()
     facts = []
     if n_base:
-        facts.append(f"- **Датасет:** ImageNet-1M ZJU, 2048-D, n_base = {n_base:,}, "
-                     "n_query = 10 000 (для измерения QPS), n_gt = 25 000.")
+        scaling_tag = ""
+        if scaling_n_max and scaling_n_max != n_base:
+            scaling_tag = (f"; **scaling-сценарий (§4)** покрывает диапазон "
+                           f"до n = {scaling_n_max:,}")
+        facts.append(f"- **Датасет:** ImageNet-1M ZJU, 2048-D, n_base = {n_base:,} "
+                     "(per-family sweep, разделы 2–3, 5), "
+                     f"n_query = 10 000 (для измерения QPS), n_gt = 25 000{scaling_tag}.")
     facts.append("- **Метрика расстояния:** L2.")
     facts.append(
         f"- **Хост:** {host['cpu']} ({host['cpu_physical']} физ. / "
@@ -2240,11 +2257,16 @@ def write_report_ru(
                 W("**Источники различий:**")
                 W()
                 if not n_match:
+                    if n_sc > n_sw:
+                        ratio_txt = (f"scaling в ~{n_sc/max(n_sw,1):.1f}× "
+                                     "больше N, чем sweep")
+                    else:
+                        ratio_txt = (f"sweep в ~{n_sw/max(n_sc,1):.1f}× "
+                                     "больше N, чем scaling")
                     W(f"0. **Разный N.** Sweep при n = {n_sw:,}, scaling при "
-                      f"n = {n_sc:,} (~{n_sw/max(n_sc,1):.2f}× больше). "
-                      "Часть Δ build_s и Δ QPS — естественная зависимость от "
-                      "размера базы; ниже учитываем только дополнительный "
-                      "вклад code-path-различий.")
+                      f"n = {n_sc:,} ({ratio_txt}). Часть Δ build_s и Δ QPS — "
+                      "естественная зависимость от размера базы; ниже учитываем "
+                      "только дополнительный вклад code-path-различий.")
                     W()
                 W("1. **IVF-семейства** — sweep выставляет "
                   "`idx.cp.min_points_per_centroid = 5`, scaling — нет. "
