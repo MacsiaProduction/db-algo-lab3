@@ -1617,114 +1617,76 @@ ANOMALY_RU: Dict[str, Tuple[str, str]] = {
     ),
     "build_s non-monotonic in M": (
         "Build_s немонотонен по M (PQ)",
-        "Сборка IVF+PQ — это IVF-обучение (~80 % времени) + per-cell PQ-kmeans. "
-        "При повторных запусках PQ-обучение прогревает CPU-кеш и второй запуск "
-        "(M=64) может оказаться быстрее первого (M=32). На большом nlist "
-        "(где IVF-обучение однозначно доминирует) эффект исчезает. "
-        "Разница в пределах ~5 % — system-noise, не сигнал о качестве."
+        "Сборка = IVF-обучение (~80 %) + per-cell PQ-kmeans. CPU-кеш "
+        "warm-up между повторными запусками даёт ~5 % разброс — "
+        "system-noise."
     ),
     "QPS немонотонен по nlist": (
         "IVFFlat nprobe=1 QPS немонотонен по nlist",
-        "При nprobe=1 в стоимость поиска входят две части: "
-        "(а) **скан центроидов** — линеен в nlist (для nlist=16384 это "
-        "16 384 × 2048 dot-product ≈ 130 МБ работы), "
-        "(б) **скан выбранного партишна** — линеен в n_base/nlist. "
-        "Сумма имеет минимум на среднем nlist: при малом nlist (256) партишн "
-        "огромный (~10 МБ), упирается в bandwidth L3; при большом nlist "
-        "(16 384) центроидный скан сам становится 130 МБ. Оптимум — "
-        "около nlist ≈ 1024…4096, где обе части помещаются в кеш."
+        "Стоимость = скан центроидов (∝ nlist) + скан партишна "
+        "(∝ n_base/nlist). Минимум на nlist ≈ 1024…4096, где обе части "
+        "помещаются в кеш."
     ),
     "HNSW efC monotonicity violated at efS": (
         "Recall HNSW немонотонен по efConstruction при низком efSearch",
-        "При efSearch ≤ 20 более «рыхлый» граф (efC=40) сохраняет больше "
-        "длинных рёбер-shortcut’ов, поэтому greedy-обход быстро находит "
-        "нужный кластер. Плотный граф (efC=400) перенасыщен локальными "
-        "связями и тот же поиск застревает. С ростом efSearch (≥ 80) "
-        "разница нивелируется и кривая становится монотонной — видно "
-        "на левой панели `05_hnsw_grid.png`."
+        "При efSearch ≤ 20 «рыхлый» граф (efC=40) сохраняет shortcut-рёбра "
+        "и greedy-обход быстро находит нужный кластер; плотный граф "
+        "(efC=400) перенасыщен локальными связями и застревает. С ростом "
+        "efSearch ≥ 80 кривая монотонна (см. `05_hnsw_grid.png`)."
     ),
     "peak RSS dropped": (
         "Peak RSS немонотонен в scaling-сценарии (HNSW)",
-        "В `scaling.csv` peak RSS у HNSW при последующем (большем) N "
-        "оказался ниже, чем при предыдущем. Между этими двумя замерами "
-        "в scaling-цикле успели пройти IVFFlat, IVFPQ и IVFSQ на том же N: "
-        "GC между сборками и `madvise()` от FAISS постепенно вытесняют "
-        "mmap-страницы базы из page-cache, поэтому HNSW при большем N "
-        "стартует с более «холодного» state и собственная аллокация HNSW "
-        "уже не восстанавливает потерянные mmap-страницы → peak ниже. "
-        "`RssPeakMonitor` корректно отражает то, что фактически резидентно. "
-        "Лечение: запускать каждое (family, n) в отдельном subprocess — "
-        "тогда замеры станут независимы."
+        "В `scaling.csv` HNSW идёт после IVF/PQ/SQ на том же N. GC и "
+        "`madvise()` вытесняют mmap-страницы базы из page-cache, "
+        "поэтому HNSW при большем N стартует с более «холодного» state. "
+        "Лечение — запускать каждое (family, n) в отдельном subprocess."
     ),
     "peak RSS": (
         "Высокий peak RSS относительно 28 ГБ цели",
-        "Peak RSS включает mmap-страницы `stream_add`. ОС считает их "
-        "резидентными у процесса, но они easily освобождаемы при "
-        "memory pressure. Реальный «private» оверхед сборки меньше — см. "
-        "разложение в `05_memory_budget.png` (фиолетовая полоса — это "
-        "именно transient mmap)."
+        "Peak RSS включает mmap-страницы `stream_add` — ОС считает их "
+        "резидентными, но они освобождаемы при memory pressure. См. "
+        "`05_memory_budget.png` (фиолетовая полоса = transient mmap)."
     ),
     "IVFPQ max R@100": (
         "Потолок Recall@100 у IVF+PQ",
-        "При 2048-D эмбеддингах PQ M=128 даёт 16 байт на вектор "
-        "(125× компрессия). Этого достаточно для Recall@100 ≈ 0.77–0.79, "
-        "но квантизация теряет тонкие различия между близкими соседями. "
-        "Любая (nlist, nprobe) комбинация в нашей сетке остаётся ниже "
-        "0.80 — это **потолок семейства** при заданном битовом бюджете, "
-        "а не методологическая ошибка. Подъём порога требует или "
-        "большего M (= больше байт/вектор, дороже хранить и считать), "
-        "или связки с rerank-стадией на оригинальных векторах."
+        "PQ M=128 на 2048-D даёт 16 байт/вектор (125× компрессия) — "
+        "потолок ~0.79. Подъём требует большего M или rerank-стадии: "
+        "запустить `scripts/tune_ivfpq.py` (или `06_pq_tuning.ipynb`)."
     ),
     "IVFFlat nlist=": (
         "IVFFlat recall немного флуктуирует с nprobe",
-        "На крайне высоком recall (≥ 0.9999) расхождение в ~10⁻⁵ "
-        "объясняется тай-брейкингом дистанций: разные перестановки "
-        "float-операций при разных nprobe → разный порядок tied "
-        "соседей. Это нативный float arithmetic noise."
+        "На recall ≥ 0.9999 расхождение ~10⁻⁵ объясняется тай-брейкингом "
+        "дистанций — нативный float arithmetic noise."
     ),
     "IVFFlat: build_s mismatch": (
         "IVFFlat build_s расходится между scaling.csv и sweep CSV",
-        "Одна и та же `(nlist, nprobe)` даёт разные build_s в `scaling.csv` "
-        "и в `ivf_flat.csv`. Причина — разные code paths: ноутбук 02 (sweep) "
-        "выставляет `idx.cp.min_points_per_centroid = 5` и "
-        "`idx.cp.max_points_per_centroid`, а ноутбук 05 (scaling) — нет. "
-        "FAISS при дефолтном пороге (~39 точек/центроид) ограничивает "
-        "число итераций Lloyd-алгоритма → IVF-обучение быстрее. "
-        "Кроме того, scaling и sweep могут быть на разных n (см. §5.2), "
-        "что добавляет естественную разницу. Recall практически идентичен "
-        "(Δ ≤ 0.5 п.п.), различаются только time-based метрики."
+        "Разные code paths: sweep выставляет "
+        "`idx.cp.min_points_per_centroid = 5`, scaling — нет (дефолт "
+        "~39 точек/центроид → меньше Lloyd-итераций → быстрее). + sweep "
+        "и scaling могут быть на разных n (см. §5.2). Recall идентичен "
+        "(Δ ≤ 0.5 п.п.)."
     ),
     "IVFPQ: build_s mismatch": (
         "IVF+PQ build_s расходится между scaling.csv и sweep CSV",
-        "Тот же сценарий, что и у IVFFlat: scaling-цикл обучает "
-        "IVF-квантизатор с дефолтным `cp.min_points_per_centroid`, "
-        "sweep — со значением 5. Сборка в scaling в ~2× быстрее за счёт "
-        "меньшего числа Lloyd-итераций; recall идентичен."
+        "Тот же `cp.min_points_per_centroid` mismatch, что и у IVFFlat. "
+        "Recall идентичен."
     ),
     "HNSW: build_s mismatch": (
         "HNSW build_s расходится между scaling.csv и sweep CSV",
-        "HNSW **не использует** k-means, поэтому `cp.min_points_per_centroid` "
-        "здесь ни при чём. Расхождение объясняется (1) разным code path "
-        "у `measure_qps` в scaling и sweep ноутбуках и (2) тем, что sweep "
-        "пересобирает HNSW сразу после IVF/PQ/SQ-замеров: page-cache горячий, "
-        "а CPU-кеш холодный. На macOS обе переменные дают ~×2 разброс между "
-        "прогонами одной и той же конфигурации. Recall одинаков (Δ ≤ 0.1 п.п.)."
+        "HNSW не использует k-means, расхождение — run-to-run jitter "
+        "(page-cache + CPU-cache state). На macOS даёт ~×2 разброс. "
+        "Recall одинаков (Δ ≤ 0.1 п.п.)."
     ),
     "LSH: build_s mismatch": (
         "LSH build_s расходится между scaling.csv и sweep CSV",
-        "У LSH (`nbits=4096`) расхождение **не связано с CP-параметрами** "
-        "(k-means не используется). Это **базовая вариативность build_s** "
-        "между прогонами — long-running malloc-bound операция чувствительна "
-        "к фоновой нагрузке и состоянию page-cache. На одном и том же "
-        "конфиге у нас 2–3× разброс между запусками; recall и QPS стабильны."
+        "k-means не используется — это базовая вариативность build_s "
+        "между прогонами (2–3× разброс). Recall и QPS стабильны."
     ),
     "scaling.csv: latency_p99_ms": (
         "scaling.csv: p99 latency измерен по другому code path",
-        "В per-family CSV колонка `latency_p99_ms` — это реальный per-chunk "
-        "p99 (50 запросов/чанк, ~200 чанков на конфиг). В `scaling.csv` "
-        "p99 посчитан по 3 батчевым повторам (отдельный code path), поэтому "
-        "там p99 ≈ mean, а в sweep-измерениях — заметно больше. Метрика "
-        "сравнима только внутри одного источника."
+        "Per-family CSV: `latency_p99_ms` — реальный per-chunk p99 "
+        "(50 запросов/чанк). В `scaling.csv` — по 3 батчевым повторам, "
+        "поэтому p99 ≈ mean. Сравнимо только внутри источника."
     ),
 }
 
@@ -1789,15 +1751,11 @@ def write_report_ru(
     W(f"# {title} — прогон `{run}`")
     W()
     if is_short:
-        W("> Краткая версия. Все графики и числа сохранены, пояснения сведены к "
-          "минимуму. Подробные объяснения и доказательства аномалий — в "
-          "`DRAFT.md`. Описание методики, алгоритмов и графиков — "
-          "`METHODOLOGY.md`.")
+        W("> Краткая версия. Графики и числа те же, что в `DRAFT.md`; "
+          "пояснения сведены к минимуму. Методика — `METHODOLOGY.md`.")
     else:
-        W("> Подробная версия (draft). Все наблюдения и аномалии сопровождаются "
-          "численными доказательствами. Без них же, в той же раскладке — "
-          "`REPORT.md`. Описание методики, алгоритмов и графиков — "
-          "`METHODOLOGY.md`.")
+        W("> Подробная версия. Сжатая копия — `REPORT.md`. Методика, "
+          "алгоритмы, чтение графиков — `METHODOLOGY.md`.")
     W()
     W("> Сгенерирован `scripts/analyze_and_report.py` из CSV в "
       f"`results/{run}/`. Графики — `docs/img/{run}/`.")
@@ -1816,11 +1774,11 @@ def write_report_ru(
     if n_base:
         scaling_tag = ""
         if scaling_n_max and scaling_n_max != n_base:
-            scaling_tag = (f"; **scaling-сценарий (§4)** покрывает диапазон "
-                           f"до n = {scaling_n_max:,}")
-        facts.append(f"- **Датасет:** ImageNet-1M ZJU, 2048-D, n_base = {n_base:,} "
-                     "(per-family sweep, разделы 2–3, 5), "
-                     f"n_query = 10 000 (для измерения QPS), n_gt = 25 000{scaling_tag}.")
+            scaling_tag = (f", scaling-сценарий (§4) до n = {scaling_n_max:,}")
+        facts.append(
+            f"- **Датасет:** ImageNet-1M ZJU, 2048-D, n_base = {n_base:,} "
+            f"(per-family sweep){scaling_tag}; n_query = 10 000, n_gt = 25 000."
+        )
     facts.append("- **Метрика расстояния:** L2.")
     facts.append(
         f"- **Хост:** {host['cpu']} ({host['cpu_physical']} физ. / "
@@ -1853,22 +1811,16 @@ def write_report_ru(
     W(f"![Cross-family Pareto](img/{run}/05_global_pareto.png)")
     W()
     if not is_short:
-        W("На графике — все измерения, сгруппированные по семейству. "
-          "Чёрный пунктир — глобальный Парето-фронт (точки, которые "
-          "никто не доминирует одновременно по Recall@100 и QPS). "
-          "Звёздами помечены рекомендованные конфигурации (колено "
-          "Парето-кривой — точка с лучшим балансом recall и QPS, "
-          "см. таблицу 2.1 ниже).")
+        W("Чёрный пунктир — глобальный Парето-фронт. Звёздами помечены "
+          "knee-конфиги каждого семейства (таблица 2.1).")
         W()
 
     # 2.1 recommended config per family (= knee point — geometric balance)
     W("### 2.1. Рекомендованная конфигурация на семейство")
     W()
     if not is_short:
-        W("Точка Парето-кривой, ближайшая к идеальному углу (Recall@100 = 1, "
-          "максимальный QPS) в нормированном пространстве [0,1]² с log-y. "
-          "Геометрически это **компромисс по умолчанию**: правее пытаться "
-          "брать recall — дорого по QPS, левее — recall падает резко.")
+        W("Knee — ближайшая к идеальному углу (Recall@100 = 1, max QPS) "
+          "точка Парето-кривой в нормированном [0,1]² с log-y.")
         W()
     # Resident index = rss_after − baseline (≈ 1.7 GB Python + train slice).
     # This matches the blue band of `05_memory_budget.png` and is what
@@ -1891,15 +1843,10 @@ def write_report_ru(
         )
     W()
     if not is_short:
-        W("«Индекс в RAM» — `rss_after − baseline (~1.7 ГБ)`, это синяя "
-          "полоса на `05_memory_budget.png`: всё, что реально лежит "
-          "резидентно у процесса (структура индекса + mmap-страницы базы). "
-          "«На диске» — размер `index.faiss` после `write_index`. У IVF+PQ "
-          "и LSH сериализуется крошечный header (десятки МБ), но при "
-          "работе индекс всё равно ходит в mmap-страницы базы, "
-          "которые ОС держит резидентными. Звёзды на Парето-графике выше "
-          "отмечают именно эти конфиги. Иной критерий выбора — порог "
-          "Recall@100 — см. 2.2.")
+        W("«Индекс в RAM» = `rss_after − baseline (~1.7 ГБ)` — синяя полоса "
+          "на `05_memory_budget.png`. «На диске» — размер `index.faiss`. "
+          "У IVF+PQ / LSH сериализуется крошечный header, но при работе "
+          "индекс ходит в mmap-страницы базы, которые остаются резидентными.")
         W()
 
     # 2.2 max-QPS config that meets R@100 >= 0.95 (only families that reach it)
@@ -1921,10 +1868,16 @@ def write_report_ru(
     if not is_short:
         skipped = (", ".join(FAMILY_RU[f] for f in missing_families)
                    if missing_families else "—")
-        W("Среди всех конфигов семейства с Recall@100 ≥ 0.95 берётся тот, "
-          "у которого максимальный QPS. "
-          f"Не дотягивают до 0.95: **{skipped}** "
-          "(для них смотри §3 — полную таблицу порогов).")
+        # Build a one-line "why they miss" hint without bloating the section.
+        miss_notes: List[str] = []
+        if "IVFPQ" in missing_families:
+            miss_notes.append("потолок IVF+PQ")
+        if "LSH" in missing_families:
+            miss_notes.append("LSH насыщается ниже 0.42")
+        miss_tail = (f" — см. §3 и §5 ({'; '.join(miss_notes)})."
+                     if miss_notes else " — см. §3 и §5.")
+        W("Конфиг с максимальным QPS из тех, чей Recall@100 ≥ 0.95.")
+        W(f"Не дотягивают: **{skipped}**{miss_tail}")
         W()
     W("| Семейство | Recall@100 | QPS | Mean lat. | Индекс в RAM | На диске | Build | Peak RSS | Конфиг |")
     W("|---|---:|---:|---:|---:|---:|---:|---:|---|")
@@ -1943,11 +1896,6 @@ def write_report_ru(
     # 2.3 quadrant winners — now with recall + QPS context for each
     W("### 2.3. Победители по отдельным метрикам (по всему набору измерений)")
     W()
-    if not is_short:
-        W("Каждый пункт показывает, какое семейство выигрывает по одной "
-          "конкретной метрике, и какие у него при этом Recall@100 и QPS — "
-          "чтобы было видно, насколько пригоден этот конфиг.")
-        W()
     if not combined.empty:
         best_recall = combined.sort_values("recall_100", ascending=False).iloc[0]
         best_qps = combined.sort_values("qps", ascending=False).iloc[0]
@@ -1973,31 +1921,10 @@ def write_report_ru(
     W(f"![Разложение peak RSS](img/{run}/05_memory_budget.png)")
     W()
     if not is_short:
-        # Build the memory commentary from the actual numbers, not from
-        # outdated hard-coded approximations.
-        if "IVFFlat" in knees.index:
-            ff_size = float(knees.loc["IVFFlat"].size_mb) / 1024
-            ff_peak = float(knees.loc["IVFFlat"].rss_peak_mb) / 1024
-            ff_share = ff_size / ff_peak * 100 if ff_peak > 0 else 0
-            ff_txt = (f"у IVFFlat сам индекс — ~{ff_size:.1f} ГБ "
-                      f"raw float-векторов, это {ff_share:.0f}% peak RSS")
-        else:
-            ff_txt = "у IVFFlat сам индекс — это десятки процентов peak RSS"
-        W(f"Разложение пикового RSS видно на стэк-баре: "
-          "серая нижняя полоса — приблизительный baseline процесса "
-          "(Python + train slice ≈ 1.7 ГБ), синяя — резидентная часть "
-          "индекса (включая mmap-страницы базы, которые ОС держит "
-          "резидентными у процесса и которые в реальном serving-сценарии "
-          "точно так же занимают RAM), фиолетовая — transient overhead "
-          "во время сборки (mmap-кеш + временные буферы, освобождаются "
-          "после `commit`/возврата).")
-        W()
-        W(f"В итоге {ff_txt}; у IVFPQ и LSH сериализованный индекс "
-          "крошечный (< 100 МБ), но фактическое резидентное потребление "
-          "сопоставимо с IVFFlat за счёт mmap-страниц базы. HNSW тоже "
-          "держит свой граф в памяти (синяя полоса сразу над baseline), "
-          "но transient overhead сборки HNSW сопоставим по высоте с "
-          "самим индексом.")
+        W("Стэк-бар: серая — baseline процесса (~1.7 ГБ), синяя — "
+          "резидентный индекс (включая mmap-страницы базы, которые в "
+          "serving тоже занимают RAM), фиолетовая — transient overhead "
+          "сборки.")
         W()
     W(f"![Средняя per-query latency](img/{run}/05_latency_best.png)")
     W()
@@ -2011,13 +1938,6 @@ def write_report_ru(
     W()
     W(f"![Recall@100 при заданном QPS-бюджете](img/{run}/05_recall_at_qps.png)")
     W()
-    if not is_short:
-        W("Графики выше показывают все семейства одновременно. Ниже — "
-          "детальный разбор каждого: диапазон параметров в выборке, "
-          "таблица «лучший QPS при пороге Recall@100» и собственная "
-          "пара диагностических графиков (как recall растёт с "
-          "параметром поиска, как растёт размер).")
-        W()
 
     def thresholds_table(sub: pd.DataFrame) -> List[str]:
         rows: List[str] = []
@@ -2033,7 +1953,6 @@ def write_report_ru(
             return ["", "_Ни одна конфигурация семейства не дотягивает до минимального "
                     "порога Recall@100 ≥ 0.20._"]
         out: List[str] = [
-            "",
             "| Порог Recall@100 | Конфиг | Recall@100 | QPS | Mean lat. |",
             "|---:|---|---:|---:|---:|",
         ]
@@ -2062,22 +1981,14 @@ def write_report_ru(
             continue
         W(f"### 3.{FAMILY_ORDER.index(fam)+1}. {FAMILY_RU[fam]}")
         W()
-        # Range bullets — switched from "min → max" (read as directional)
-        # to "min ... max" with explicit (min/max) labels. Several reviewers
-        # found the arrow notation confusing because it looks like a
-        # change-of-value rather than a range.
-        W(f"- **Конфигов в выборке:** {len(sub)}.")
-        W(f"- **Recall@100:** от {sub.recall_100.min():.3f} (min) до "
-          f"{sub.recall_100.max():.4f} (max).")
-        W(f"- **QPS:** от {sub.qps.min():,.0f} (min) до "
-          f"{sub.qps.max():,.0f} (max).")
-        W(f"- **Размер индекса:** от {fmt_mb(sub.size_mb.min())} до "
-          f"{fmt_mb(sub.size_mb.max())}.")
-        W(f"- **Build:** от {fmt_s(sub.build_s.min())} до "
-          f"{fmt_s(sub.build_s.max())}.")
+        W(
+            f"- **N:** {len(sub)} конфигов · "
+            f"R@100 ∈ [{sub.recall_100.min():.3f}, {sub.recall_100.max():.4f}] · "
+            f"QPS ∈ [{sub.qps.min():,.0f}, {sub.qps.max():,.0f}] · "
+            f"size ∈ [{fmt_mb(sub.size_mb.min())}, {fmt_mb(sub.size_mb.max())}] · "
+            f"build ∈ [{fmt_s(sub.build_s.min())}, {fmt_s(sub.build_s.max())}]."
+        )
         W()
-        W("Лучшая конфигурация при каждом пороге Recall@100 "
-          "(берём конфиг с максимальным QPS, чей recall ≥ порога):")
         for line in thresholds_table(sub):
             W(line)
         # Per-family grid chart
@@ -2085,43 +1996,30 @@ def write_report_ru(
             chart_file, alt = PER_FAMILY_CHART[fam]
             W()
             W(f"![{alt}](img/{run}/{chart_file})")
-        # Family-specific commentary
         if fam == "IVFPQ" and not is_short:
             W()
             r_max = float(sub.recall_100.max())
-            W(f"На правой панели видно, что максимальный достижимый "
-              f"Recall@100 ≈ {r_max:.2f} — это **потолок семейства** "
-              "на 2048-D ResNet-эмбеддингах при заданном битовом бюджете "
-              "(см. §5).")
+            W(f"Потолок Recall@100 ≈ {r_max:.2f} (квантизация при 2048-D); "
+              "пробить можно только rerank-стадией — см. §5 и "
+              "`scripts/tune_ivfpq.py` (или `06_pq_tuning.ipynb`).")
         elif fam == "IVFFlat" and not is_short:
             W()
-            W("На левой панели видно, как recall растёт с nprobe и "
-              "выходит на 1.0 раньше у больших nlist. На правой — "
-              "при низком nprobe больший nlist даёт **выше** QPS "
-              "(партишн помещается в L2 кеш), но при высоком "
-              "nprobe — наоборот, скан большого числа партишнов "
-              "обходится дороже.")
+            W("При низком nprobe больший nlist даёт **выше** QPS "
+              "(партишн в L2 кеш); при высоком nprobe — наоборот.")
         elif fam == "IVFSQ" and not is_short:
             W()
-            W("SQ8 (синие маркеры на правой панели) даёт более высокий "
-              "recall, чем SQ4 (красные) — 8-битная квантизация теряет "
-              "меньше информации. Цена — индекс в 2× больше (1 байт/"
-              "координату vs 0.5 байт/координату). При nlist ≥ 1024 "
-              "комбинация (SQ8, nlist, nprobe) даёт лучший trade-off, "
-              "чем родственная (SQ4, та же nlist, x4 nprobe).")
+            W("SQ8 на правой панели — recall выше, чем у SQ4, ценой 2× "
+              "размера индекса. При nlist ≥ 1024 (SQ8, nlist, nprobe) "
+              "доминирует (SQ4, та же nlist, ×4 nprobe).")
         elif fam == "HNSW" and not is_short:
             W()
-            W("Recall на левой панели растёт почти монотонно с efSearch "
-              "у всех (M, efC); при efSearch ≤ 20 видна **немонотонность** "
-              "по efC — рассмотрена в §5 как аномалия. Правая панель "
-              "показывает, что при одинаковом recall меньшее M (8, 16) "
-              "выигрывает по QPS — граф проще обходится.")
+            W("Recall растёт почти монотонно с efSearch; при efSearch ≤ 20 "
+              "видна немонотонность по efC (см. §5). При одинаковом recall "
+              "меньшее M выигрывает по QPS.")
         elif fam == "LSH" and not is_short:
             W()
-            W("Левая панель показывает классическую проблему LSH на "
-              "высокоразмерных эмбеддингах: даже nbits=4096 (276 МБ) "
-              "не пробивает Recall@100 ≈ 0.42. На правой видно, что "
-              "footprint растёт линейно, а recall — насыщается.")
+            W("Даже nbits=4096 (276 МБ) не пробивает Recall@100 ≈ 0.42 — "
+              "footprint растёт линейно, recall насыщается.")
         W()
 
     # --------------------------------------------------------------
@@ -2141,11 +2039,9 @@ def write_report_ru(
         W(f"![Scaling: recall/QPS/build/RSS vs N](img/{run}/05_scaling.png)")
         W()
         if not is_short:
-            W(f"_Данные ниже — из `scaling.csv` (ноутбук 05, {n_pts} точек по N "
-              f"от {n_min:,} до {n_max:,}). Это отдельный code path по сравнению "
-              "с per-family sweep: recall сравним, build_s и p99 — нет, см. §5.2._")
+            W(f"_Источник: `scaling.csv` (ноутбук 05, {n_pts} точек, "
+              "отдельный code path — см. §5.2)._")
             W()
-            # IVFFlat: actual QPS ratio across the scaling range
             ivfflat_sc = scaling[scaling.family == "IVFFlat"].sort_values("n")
             hnsw_sc = scaling[scaling.family == "HNSW"].sort_values("n")
             qps_ivfflat_drop = (ivfflat_sc.qps.iloc[0] / ivfflat_sc.qps.iloc[-1]
@@ -2154,17 +2050,11 @@ def write_report_ru(
                              if len(hnsw_sc) >= 2 else None)
             drop_iv = f"~{qps_ivfflat_drop:.0f}×" if qps_ivfflat_drop else "значительная"
             drop_hn = f"~{qps_hnsw_drop:.1f}×" if qps_hnsw_drop else "сублинейная"
-            W("Для каждого семейства взята одна репрезентативная конфигурация "
-              f"(см. таблицу) и {n_pts} точек по N. **Recall** немного растёт с N "
-              "у HNSW и IVFFlat (фиксированный k=100 захватывает больше из "
-              "более плотного соседства), у IVFPQ **деградирует** (квантизатор "
-              "обучен на 200K точек — на больших N теряется тонкая "
-              "разрешающая способность), у LSH тоже падает (фиксированное "
-              "число случайных гиперплоскостей размывается на большом базе). "
-              f"**QPS** падает сильно у IVFFlat (центроидный скан + увеличение "
-              f"среднего партишна — {drop_iv} потеря при {growth:.1f}× росте N), "
-              f"сублинейно у HNSW (graph search; {drop_hn} потеря), "
-              "у IVFPQ и LSH — линейно с n_base.")
+            W(f"**Recall** растёт с N у HNSW/IVFFlat, **деградирует** у "
+              "IVFPQ (квантизатор обучен на 200K) и у LSH (фиксированное "
+              f"число гиперплоскостей). **QPS** при {growth:.1f}× росте N: "
+              f"IVFFlat теряет {drop_iv} (центроидный скан + рост партишна), "
+              f"HNSW — {drop_hn} (graph search), IVFPQ/LSH — линейно.")
             W()
         W("| Family | N | Recall@100 | QPS | Build | Peak RSS |")
         W("|---|---:|---:|---:|---:|---:|")
@@ -2196,10 +2086,13 @@ def write_report_ru(
         W()
 
         if not is_short:
-            W("### 5.1. Подробные объяснения с доказательствами")
+            W("### 5.1. Объяснения")
             W()
             # Group anomalies that share the same long explanation so we don't
             # repeat the same paragraph for, say, HNSW efS=10 vs efS=20.
+            # Each group becomes one numbered entry; numerical evidence is
+            # already in the table above (§5 summary), so we skip the bullet
+            # list of `key → detail` here to avoid duplication.
             seen: Dict[str, List[dict]] = {}
             order: List[str] = []
             for a in anomalies_sorted:
@@ -2216,12 +2109,7 @@ def write_report_ru(
                 short = _ru_anomaly_short(first)
                 sev_max = min(group, key=lambda x: rank_sev.get(x["severity"], 9))["severity"]
                 sev = _ru_severity(sev_max)
-                W(f"#### {i}. {short} *(severity: {sev})*")
-                W()
-                W("**Сырые числа из CSV:**")
-                W()
-                for a in group:
-                    W(f"- `{a['key']}` → `{a['detail']}`")
+                W(f"**{i}. {short}** *(severity: {sev})*")
                 W()
                 W(long)
                 W()
@@ -2236,17 +2124,11 @@ def write_report_ru(
             n_match = (n_sc == n_sw)
             if not is_short:
                 if n_match:
-                    W(f"Одна и та же `(family, config)` при n = {n_sc:,} "
-                      "измерена дважды — в `<family>.csv` (per-family sweep) "
-                      "и в `scaling.csv` (ноутбук 05). Это два разных code path. "
-                      "Сравнение build_s и QPS:")
+                    W(f"sweep @ n = {n_sw:,}, scaling @ n = {n_sc:,} — "
+                      "два code paths:")
                 else:
-                    W(f"`scaling.csv` останавливается на n = {n_sc:,}, "
-                      f"per-family sweep сделан при n = {n_sw:,}. Сравниваем "
-                      "одни и те же `(family, config)` в этих двух источниках. "
-                      "Разница включает (a) **разные code paths** и (b) "
-                      "**разный N**, поэтому абсолютные числа не совпадают, "
-                      "но порядок и причины различий видны:")
+                    W(f"sweep @ n = {n_sw:,}, scaling @ n = {n_sc:,} — "
+                      "два code paths + разный N:")
                 W()
             W("| Family | Конфиг | build_s sweep | build_s scaling | Δ build | QPS sweep | QPS scaling | Δ QPS |")
             W("|---|---|---:|---:|---:|---:|---:|---:|")
@@ -2261,41 +2143,22 @@ def write_report_ru(
                 )
             W()
             if not is_short:
-                W("**Источники различий:**")
-                W()
                 if not n_match:
-                    if n_sc > n_sw:
-                        ratio_txt = (f"scaling в ~{n_sc/max(n_sw,1):.1f}× "
-                                     "больше N, чем sweep")
-                    else:
-                        ratio_txt = (f"sweep в ~{n_sw/max(n_sc,1):.1f}× "
-                                     "больше N, чем scaling")
-                    W(f"0. **Разный N.** Sweep при n = {n_sw:,}, scaling при "
-                      f"n = {n_sc:,} ({ratio_txt}). Часть Δ build_s и Δ QPS — "
-                      "естественная зависимость от размера базы; ниже учитываем "
-                      "только дополнительный вклад code-path-различий.")
-                    W()
-                W("1. **IVF-семейства** — sweep выставляет "
-                  "`idx.cp.min_points_per_centroid = 5`, scaling — нет. "
-                  "FAISS с дефолтным минимумом (39 точек/центроид) ограничивает "
-                  "число итераций Lloyd-алгоритма → обучение IVF-квантизатора "
-                  "в ~2× быстрее. Recall практически одинаков (Δ ≤ 0.5 п.п.), "
-                  "но build_s — нет.")
+                    W(f"- **Разный N** (sweep @ {n_sw:,}, scaling @ "
+                      f"{n_sc:,}) — часть Δ build_s и Δ QPS объясняется "
+                      "размером базы.")
+                W("- **IVF: разный `cp.min_points_per_centroid`** — "
+                  "sweep = 5, scaling = дефолт (~39): scaling-обучение в "
+                  "~2× быстрее, recall идентичен (Δ ≤ 0.5 п.п.).")
+                W("- **HNSW/LSH: run-to-run jitter** — k-means не "
+                  "используется, вариативность build_s на macOS даёт 2–3× "
+                  "разброс; recall и QPS совпадают в пределах ~5 %.")
+                W("- **p99 latency** — scaling считает по 3 батчевым "
+                  "повторам (p99 ≈ mean), sweep — per-chunk "
+                  "(50 запросов/чанк).")
                 W()
-                W("2. **HNSW и LSH** не используют k-means, поэтому "
-                  "`cp.min_points_per_centroid` тут ни при чём. Различие для "
-                  "них — это **базовая run-to-run вариативность** build_s: "
-                  "long-running malloc-bound операции на macOS дают 2–3× разброс "
-                  "между запусками. Recall и QPS совпадают в пределах ~5 %.")
-                W()
-                W("3. **p99 latency** в scaling.csv считается по 3 батчевым "
-                  "повторам, в sweep CSV — по per-chunk распределению "
-                  "(50 запросов/чанк), поэтому в scaling p99 ≈ mean, в sweep "
-                  "p99 заметно больше (см. §6).")
-                W()
-                W("Recall между двумя источниками сходится — качество индексов "
-                  "идентично, различаются только time-based метрики build_s / "
-                  "QPS / p99.")
+                W("Recall сходится между источниками — качество индексов "
+                  "идентично, различаются только time-based метрики.")
                 W()
     else:
         W("Автоматическая проверка не нашла аномалий.")
@@ -2312,65 +2175,40 @@ def write_report_ru(
         W("- Train slice = 200 000 векторов; при nlist=16384 это "
           "~12 точек/центроид — FAISS пишет варнинг `lloyd_3`.")
         W("- Ground truth пересчитан локально через `IndexFlatL2`, кеш "
-          "`data/gt_n1281167_k100.npy`.")
+          "`data/gt_n{n}_k100.npy`.")
         W("- Peak RSS включает mmap-страницы базы (доминирует у IVFPQ/LSH).")
         W("- `scaling.csv` — отдельный code path: p99 ≈ mean, build_s "
           "у IVF в ~2× быстрее (без `cp.min_points_per_centroid=5`), см. §5.")
     else:
-        W("**1. QPS-замер.** Скрипт `run_all.sh` выставляет "
-          "`LAB_QPS_REPEAT=3 LAB_QPS_WARMUP=1`: один warm-up прогон + 3 "
-          "повтора + медиана. Это снижает шум.")
-        W()
-        W("**2. p99 latency.** В `utils.measure_qps` батч разрезается на "
-          "чанки по 50 запросов, каждый чанк таймится отдельно, p99 берётся "
-          "по этому распределению. Этот per-chunk p99 лежит в колонке "
-          "`latency_p99_ms` всех per-family CSV (и показан на "
-          "`05_latency_best.png` рядом с mean). В `scaling.csv` p99 "
-          "считается по 3 батчевым повторам (отдельный code path), поэтому "
-          "там p99 ≈ mean — это flag в §5.")
-        W()
-        W("**3. Centroid undertraining при nlist=16384.** Train slice = "
-          "200 000 векторов, при nlist=16384 это ~12 точек/центроид. "
-          "FAISS явно предупреждает (`lloyd_3`). IVFFlat-конфигурации "
-          "с этим nlist слегка под-тренированы, но recall-числа "
-          "адекватны фактическому состоянию обученного индекса.")
-        W()
         ivsq_df = frames.get("ivf_sq")
         ivsq_rows = 0 if ivsq_df is None else len(ivsq_df)
         ivsq_nlists = (sorted(ivsq_df.nlist.unique().tolist())
                        if ivsq_df is not None and len(ivsq_df) else [])
-        W(f"**4. IVFSQ — расширенный sweep.** IVFSQ перебирает "
-          f"nlist ∈ {ivsq_nlists} и типы {{SQ4, SQ8}}. "
-          f"В `results/full/ivf_sq.csv` — {ivsq_rows} конфигов.")
-        W()
-        W("**5. Ground truth пересчитан локально.** Стандартный GT "
-          "(`imagenet_groundtruth.ivecs`) индексирует в IDs > N для "
-          "любого N < 1 281 167, поэтому для выборки с произвольным N "
-          "используется свежий GT, пересчитанный через `IndexFlatL2` "
-          "над тем же base-slice. Кеш — `data/gt_n1281167_k100.npy`. "
-          "Числа recall сравнимы между всеми измерениями.")
-        W()
-        W("**6. Peak RSS включает mmap-страницы.** `stream_add` "
-          "проходит base через `np.memmap`; ОС считает резидентные "
-          "страницы у процесса, и пик RSS суммирует index + train slice "
-          "+ mmap-кеш + Python overhead. Для IVFPQ/LSH доминирует именно "
-          "mmap-кеш. Видно на `05_memory_budget.png` (фиолетовая полоса). "
-          "Альтернатива — `madvise(DONTNEED)` после сборки; не критично, "
-          "поскольку эти страницы легко освобождаются ОС при memory "
-          "pressure.")
-        W()
-        W("**7. RssPeakMonitor sampling.** Интервал 50 мс. Кратковременные "
-          "пики < 50 мс могут быть упущены (типично для FAISS — пиковые "
-          "аллокации происходят во время Lloyd-iter и длятся секунды).")
-        W()
-        W("**8. `scaling.csv` — отдельный code path.** Per-family CSV "
-          "(`results/full/{ivf,hnsw,lsh}*.csv`) и `scaling.csv` сделаны в "
-          "разных ноутбуках с разными настройками: (a) p99 в scaling — "
-          "по 3 батчевым повторам, в sweep — per-chunk, (b) IVF-семейства "
-          "в scaling без `cp.min_points_per_centroid=5`, поэтому build_s "
-          "в ~2× быстрее, (c) HNSW/LSH build_s — естественный run-to-run "
-          "jitter. Recall сравним между источниками, time-based метрики — "
-          "нет; расхождения помечены как аномалии в §5.2.")
+        W("- **QPS-замер.** `LAB_QPS_REPEAT=3 LAB_QPS_WARMUP=1`: один "
+          "warm-up + 3 повтора + медиана.")
+        W("- **p99 latency.** Per-chunk (50 запросов/чанк, ~200 чанков/"
+          "конфиг) в `utils.measure_qps`. В `scaling.csv` p99 считается "
+          "по 3 батчевым повторам (отдельный code path) — там p99 ≈ mean, "
+          "см. §5.")
+        W("- **Centroid undertraining при nlist=16384.** Train slice = "
+          "200K, т.е. ~12 точек/центроид — FAISS пишет `lloyd_3`; "
+          "recall-числа адекватны фактическому состоянию обученного "
+          "индекса.")
+        W(f"- **IVFSQ sweep.** nlist ∈ {ivsq_nlists}, типы "
+          f"{{SQ4, SQ8}}, итого {ivsq_rows} конфигов.")
+        W("- **Ground truth.** Стандартный GT индексирует в IDs > N для "
+          "N < 1.28 M, поэтому пересчитан локально через `IndexFlatL2` "
+          "над тем же base-slice (кеш `data/gt_n{n}_k100.npy`).")
+        W("- **Peak RSS.** Включает mmap-страницы базы из `stream_add` — "
+          "у IVFPQ/LSH они доминируют. См. `05_memory_budget.png`.")
+        W("- **`RssPeakMonitor` sampling.** Интервал 50 мс; пики < 50 мс "
+          "могут быть упущены.")
+        W("- **`scaling.csv` — отдельный code path.** P99 по 3 батчам, "
+          "IVF без `cp.min_points_per_centroid=5`. Recall сравним, "
+          "time-based метрики — нет; см. §5.2.")
+        W("- **PQ recall ceiling.** Чтобы пробить потолок ~0.79 R@100, "
+          "запустить `python3 scripts/tune_ivfpq.py` (IVF+PQ + "
+          "`IndexRefineFlat`, отдельно от `run_all.sh`).")
     W()
 
     # --------------------------------------------------------------
@@ -2387,19 +2225,16 @@ def write_report_ru(
 
     h = _best_at("HNSW", 0.95)
     if h is not None:
-        transient_frac = max(0.0, (h.rss_peak_mb - h.rss_mb)) / max(1.0, h.rss_peak_mb)
         h99 = _best_at("HNSW", 0.99)
-        h99_txt = (f" Для Recall@100 ≥ 0.99 — `{config_str(h99)}` "
-                   f"(R@100 = {h99.recall_100:.4f}, {h99.qps:,.0f} QPS)."
+        h99_txt = (f" R@100 ≥ 0.99: `{config_str(h99)}` "
+                   f"({h99.recall_100:.4f}, {h99.qps:,.0f} QPS)."
                    if h99 is not None else "")
         W(
-            f"- **Поиск с высоким Recall@100 (≥ 0.95)** → **HNSW** "
+            f"- **High-recall (R@100 ≥ 0.95) → HNSW** "
             f"`{config_str(h)}`: {h.qps:,.0f} QPS, "
-            f"{h.latency_ms:.3f} мс средняя latency, "
+            f"{h.latency_ms:.3f} мс, "
             f"{fmt_mb(h.size_mb)} на диске, "
-            f"{fmt_mb(h.rss_peak_mb)} peak RSS "
-            f"(~{transient_frac*100:.0f} % — transient overhead сборки, "
-            f"освобождается после `commit`/возврата).{h99_txt}"
+            f"{fmt_mb(h.rss_peak_mb)} peak RSS.{h99_txt}"
         )
     pq_max = combined[combined.family == "IVFPQ"]
     if len(pq_max):
@@ -2412,13 +2247,12 @@ def write_report_ru(
         else:
             size_ratio = float("nan")
         W(
-            f"- **Минимальный размер индекса** → **IVF+PQ** "
+            f"- **Минимальный индекс на диске → IVF+PQ** "
             f"`{config_str(b)}`: {fmt_mb(b.size_mb)} "
             f"(~{size_ratio:.0f}× меньше IVFFlat knee), "
-            f"Recall@100 = {b.recall_100:.3f}, {b.qps:,.0f} QPS. "
-            f"Потолок семейства — Recall@100 = {pq_max.recall_100.max():.3f} "
-            "(M=128, 16 байт/вектор). Использовать как кандидат-генератор "
-            "перед rerank-стадией на оригинальных векторах."
+            f"R@100 = {b.recall_100:.3f}, {b.qps:,.0f} QPS. "
+            f"Потолок семейства {pq_max.recall_100.max():.3f} — "
+            "нужна rerank-стадия (`scripts/tune_ivfpq.py`)."
         )
     sq = _best_at("IVFSQ", 0.95)
     if sq is not None:
@@ -2428,44 +2262,31 @@ def write_report_ru(
         else:
             sq_ratio_txt = "компактнее IVFFlat"
         W(
-            f"- **Компрессия с высоким recall** → **IVF+SQ-8** "
-            f"`{config_str(sq)}`: Recall@100 = {sq.recall_100:.4f}, "
-            f"{sq.qps:,.0f} QPS, {fmt_mb(sq.size_mb)} ({sq_ratio_txt}). "
-            f"Per-query latency {sq.latency_ms:.2f} мс — медленнее HNSW, "
-            "потому что SQ декодирует значения на лету при вычислении "
-            "дистанции, но в разы быстрее, чем IVFFlat на том же recall."
+            f"- **Компрессия + recall → IVF+SQ-8** "
+            f"`{config_str(sq)}`: R@100 = {sq.recall_100:.4f}, "
+            f"{sq.qps:,.0f} QPS, {fmt_mb(sq.size_mb)} ({sq_ratio_txt}), "
+            f"{sq.latency_ms:.2f} мс."
         )
     ff = _best_at("IVFFlat", 0.95)
     if ff is not None:
         W(
-            f"- **Точный (exact-ish) baseline** → **IVFFlat** `{config_str(ff)}`: "
-            f"Recall@100 = {ff.recall_100:.4f}, {ff.qps:,.0f} QPS, "
-            f"{fmt_mb(ff.size_mb)}. Build {fmt_s(ff.build_s)}. "
-            "Сборка дорогая, QPS низкий — но индекс хранит сырые float-векторы, "
-            "поэтому recall максимально приближен к точному поиску. "
-            "Полезен как калибратор Ground Truth, не как serving-движок."
+            f"- **Exact-ish baseline → IVFFlat** `{config_str(ff)}`: "
+            f"R@100 = {ff.recall_100:.4f}, {ff.qps:,.0f} QPS, build "
+            f"{fmt_s(ff.build_s)} — для GT-калибровки, не serving."
         )
     lsh_max = combined[combined.family == "LSH"]
     if len(lsh_max):
         lb = lsh_max.sort_values("recall_100", ascending=False).iloc[0]
         W(
-            f"- **LSH непригоден на этом датасете** — даже при "
-            f"`{config_str(lb)}` (276 МБ индекс) Recall@100 = {lb.recall_100:.3f}. "
-            "При 2048-D случайные гиперплоскости требуют экспоненциального "
-            "числа бит на единицу cosine-разрешения — footprint уходит за "
-            "PQ задолго до того, как recall становится приемлемым."
+            f"- **LSH непригоден** — `{config_str(lb)}` "
+            f"({fmt_mb(lb.size_mb)}) → R@100 = {lb.recall_100:.3f}. "
+            "При 2048-D случайные гиперплоскости требуют "
+            "экспоненциального числа бит."
         )
     W()
-    # Final recommendation uses the actual high-recall pick, not a hardcoded one.
-    if h is not None:
-        rec_label = f"HNSW (`{config_str(h)}`)"
-    else:
-        rec_label = "HNSW (см. таблицу 2.2)"
-    W(f"**Итог:** {rec_label} — дефолтный выбор для high-recall поиска; "
-      "IVF+PQ — только в связке с rerank-стадией; "
-      "IVF+SQ-8 — компромисс по размеру/latency, если QPS-бюджет небольшой "
-      "и хочется ×4 компрессии; IVFFlat — оффлайн-калибровка GT; "
-      "LSH — отбросить для этого датасета.")
+    W("**Итог:** HNSW (`M=16, efConstruction=200, efSearch=80`) для "
+      "serving; IVF+SQ-8 если нужна ×4 компрессия; IVF+PQ только с "
+      "rerank; IVFFlat — оффлайн GT-калибратор; LSH — отбросить.")
     W()
     W()
     W(f"_Полные CSV — `results/{run}/`. Графики — `docs/img/{run}/`. "
