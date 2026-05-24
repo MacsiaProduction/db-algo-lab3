@@ -1870,21 +1870,36 @@ def write_report_ru(
           "Геометрически это **компромисс по умолчанию**: правее пытаться "
           "брать recall — дорого по QPS, левее — recall падает резко.")
         W()
-    W("| Семейство | Recall@100 | QPS | Mean lat. | Index size | Build | Peak RSS | Конфиг |")
-    W("|---|---:|---:|---:|---:|---:|---:|---|")
+    # Resident index = rss_after − baseline (≈ 1.7 GB Python + train slice).
+    # This matches the blue band of `05_memory_budget.png` and is what
+    # actually occupies RAM at serving time, regardless of the on-disk
+    # size of the serialised index.
+    BASELINE_MB = 1.7 * 1024
+    def _ram(row) -> float:
+        return max(0.0, float(row.rss_mb) - BASELINE_MB)
+    W("| Семейство | Recall@100 | QPS | Mean lat. | Индекс в RAM | На диске | Build | Peak RSS | Конфиг |")
+    W("|---|---:|---:|---:|---:|---:|---:|---:|---|")
     for fam in FAMILY_ORDER:
         if fam not in knees.index:
             continue
         r = knees.loc[fam]
         W(
             f"| **{FAMILY_RU[fam]}** | {r.recall_100:.4f} | "
-            f"{r.qps:,.0f} | {r.latency_ms:.3f} мс | {fmt_mb(r.size_mb)} | "
+            f"{r.qps:,.0f} | {r.latency_ms:.3f} мс | "
+            f"{fmt_mb(_ram(r))} | {fmt_mb(r.size_mb)} | "
             f"{fmt_s(r.build_s)} | {fmt_mb(r.rss_peak_mb)} | `{r.config}` |"
         )
     W()
     if not is_short:
-        W("Звёзды на Парето-графике выше отмечают именно эти конфиги. "
-          "Иной критерий выбора — порог Recall@100 — см. 2.2.")
+        W("«Индекс в RAM» — `rss_after − baseline (~1.7 ГБ)`, это синяя "
+          "полоса на `05_memory_budget.png`: всё, что реально лежит "
+          "резидентно у процесса (структура индекса + mmap-страницы базы). "
+          "«На диске» — размер `index.faiss` после `write_index`. У IVF+PQ "
+          "и LSH сериализуется крошечный header (десятки МБ), но при "
+          "работе индекс всё равно ходит в mmap-страницы базы, "
+          "которые ОС держит резидентными. Звёзды на Парето-графике выше "
+          "отмечают именно эти конфиги. Иной критерий выбора — порог "
+          "Recall@100 — см. 2.2.")
         W()
 
     # 2.2 max-QPS config that meets R@100 >= 0.95 (only families that reach it)
@@ -1911,14 +1926,15 @@ def write_report_ru(
           f"Не дотягивают до 0.95: **{skipped}** "
           "(для них смотри §3 — полную таблицу порогов).")
         W()
-    W("| Семейство | Recall@100 | QPS | Mean lat. | Index size | Build | Peak RSS | Конфиг |")
-    W("|---|---:|---:|---:|---:|---:|---:|---|")
+    W("| Семейство | Recall@100 | QPS | Mean lat. | Индекс в RAM | На диске | Build | Peak RSS | Конфиг |")
+    W("|---|---:|---:|---:|---:|---:|---:|---:|---|")
     high_recall_families: List[str] = []
     for fam, b in high_recall_picks:
         high_recall_families.append(fam)
         W(
             f"| **{FAMILY_RU[fam]}** | {b.recall_100:.4f} | "
-            f"{b.qps:,.0f} | {b.latency_ms:.3f} мс | {fmt_mb(b.size_mb)} | "
+            f"{b.qps:,.0f} | {b.latency_ms:.3f} мс | "
+            f"{fmt_mb(_ram(b))} | {fmt_mb(b.size_mb)} | "
             f"{fmt_s(b.build_s)} | {fmt_mb(b.rss_peak_mb)} | "
             f"`{config_str(b)}` |"
         )
@@ -1943,7 +1959,7 @@ def write_report_ru(
         W(f"- **Максимальный QPS:** {FAMILY_RU[best_qps['family']]} = "
           f"{best_qps['qps']:,.0f}, при Recall@100 = "
           f"{best_qps['recall_100']:.3f} (`{config_str(best_qps)}`).")
-        W(f"- **Минимальный размер индекса:** {FAMILY_RU[smallest['family']]} "
+        W(f"- **Минимальный индекс на диске:** {FAMILY_RU[smallest['family']]} "
           f"= {fmt_mb(float(smallest['size_mb']))}, Recall@100 = "
           f"{smallest['recall_100']:.3f}, QPS = {smallest['qps']:,.0f} "
           f"(`{config_str(smallest)}`).")
