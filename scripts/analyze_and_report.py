@@ -652,21 +652,16 @@ def plot_best_bars(summary: pd.DataFrame, plots: Path) -> None:
 def plot_memory_budget(summary: pd.DataFrame, plots: Path) -> None:
     """Stacked-bar decomposition of peak RSS.
 
-    Four bands per family (always sum to rss_peak_mb):
+    Three bands per family (always sum to rss_peak_mb):
       1. baseline (constant ≈ 1.7 GB) — Python interpreter + ~200K train
          vectors that stay resident during build.
-      2. index resident — min(size_mb, rss_after - baseline) clipped ≥ 0.
-         The serialised-on-disk index is in general only partly resident in
-         RAM by the time we sample rss_after.
-      3. mmap & residual — rss_after − baseline − index_resident; this picks
-         up mmap'd base pages held by the OS page-cache and accumulated state
-         from previous builds in the same notebook.
-      4. transient peak overhead — rss_peak_mb − rss_after; mmap pages and
+      2. index (resident) — everything between baseline and rss_after.
+         Includes the serialised index plus mmap'd base pages and any
+         residual pages held by FAISS at sample time. We treat all of this
+         as "index footprint" because the user does not care whether a page
+         is technically the index struct or a still-mapped base shard.
+      3. transient peak overhead — rss_peak_mb − rss_after; mmap pages and
          intermediate buffers released before rss_after was sampled.
-
-    This is more honest than min(size, rss_after) because for HNSW (and other
-    families whose serialised footprint ≈ resident footprint) the previous
-    "other" band collapsed to zero and the chart looked under-decomposed.
     """
     picks = _picks_for_charts(summary)
     if picks.empty:
@@ -680,32 +675,26 @@ def plot_memory_budget(summary: pd.DataFrame, plots: Path) -> None:
     peak = (picks.rss_peak_mb / 1024).to_numpy()
     size = (picks.size_mb / 1024).to_numpy()
 
-    baseline = np.full_like(rss_after, BASELINE_GB)
-    baseline = np.minimum(baseline, rss_after)
-    headroom = np.clip(rss_after - baseline, 0, None)
-    idx_resident = np.minimum(size, headroom)
-    mmap_residual = np.clip(headroom - idx_resident, 0, None)
+    baseline = np.minimum(np.full_like(rss_after, BASELINE_GB), rss_after)
+    index_resident = np.clip(rss_after - baseline, 0, None)
     transient = np.clip(peak - rss_after, 0, None)
 
     ax.bar(xs, baseline, width,
            label=f"baseline процесса (Python + train slice ≈ {BASELINE_GB:.1f} ГБ)",
            color="#7f7f7f", edgecolor="black", lw=0.5)
-    ax.bar(xs, idx_resident, width, bottom=baseline,
-           label="резидентная часть индекса (≤ size_mb)",
+    ax.bar(xs, index_resident, width, bottom=baseline,
+           label="индекс (резидентная часть, включая mmap-страницы базы)",
            color="#1f77b4", edgecolor="black", lw=0.5)
-    ax.bar(xs, mmap_residual, width, bottom=baseline + idx_resident,
-           label="mmap-страницы базы + residual от прошлых билдов",
-           color="#ff7f0e", edgecolor="black", lw=0.5)
-    ax.bar(xs, transient, width, bottom=baseline + idx_resident + mmap_residual,
+    ax.bar(xs, transient, width, bottom=baseline + index_resident,
            label="transient overhead во время сборки",
            color="#9467bd", edgecolor="black", lw=0.5)
     ax.axhline(28, color="red", ls=":", lw=1.1, label="28 ГБ потолок RAM")
     for x, v in zip(xs, peak):
         ax.text(x, v + 0.4, f"peak {v:.1f} ГБ", ha="center", va="bottom", fontsize=8)
-    # Annotate "size on disk" inside the index band so people can compare
-    # against resident.
-    for x, sz, b, ir in zip(xs, size, baseline, idx_resident):
-        if sz > 0.05:
+    # "size on disk" annotation inside the index band so people can compare
+    # against the serialised file size.
+    for x, sz, b, ir in zip(xs, size, baseline, index_resident):
+        if sz > 0.05 and ir > 0.6:
             ax.text(x, b + ir / 2, f"size={sz:.2f} ГБ",
                     ha="center", va="center", fontsize=7, color="white",
                     fontweight="bold")
@@ -713,7 +702,7 @@ def plot_memory_budget(summary: pd.DataFrame, plots: Path) -> None:
     ax.set_xticklabels([FAMILY_RU.get(f, f) for f in picks.family])
     ax.set_ylabel("ГБ")
     ax.set_ylim(0, max(30, peak.max() + 2))
-    ax.set_title("Разложение peak RSS — рекомендованная конфигурация на 1.28 M базе")
+    ax.set_title("Разложение peak RSS — рекомендованная конфигурация")
     ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
     fig.savefig(plots / "05_memory_budget.png", bbox_inches="tight")
@@ -1981,16 +1970,18 @@ def write_report_ru(
         W(f"Разложение пикового RSS видно на стэк-баре: "
           "серая нижняя полоса — приблизительный baseline процесса "
           "(Python + train slice ≈ 1.7 ГБ), синяя — резидентная часть "
-          "индекса, оранжевая — mmap-страницы базы и накопленный state "
-          "от предыдущих конфигов в этом ноутбуке, фиолетовая — "
-          "transient overhead во время сборки (mmap-кеш + временные "
-          "буферы, освобождаются после `commit`/возврата).")
+          "индекса (включая mmap-страницы базы, которые ОС держит "
+          "резидентными у процесса и которые в реальном serving-сценарии "
+          "точно так же занимают RAM), фиолетовая — transient overhead "
+          "во время сборки (mmap-кеш + временные буферы, освобождаются "
+          "после `commit`/возврата).")
         W()
         W(f"В итоге {ff_txt}; у IVFPQ и LSH сериализованный индекс "
-          "крошечный (< 100 МБ), а большую часть пика держат "
-          "mmap-страницы базы. HNSW также держит свой граф в памяти "
-          "(синяя полоса видна сразу над baseline), но transient "
-          "overhead сборки HNSW сопоставим по высоте с самим индексом.")
+          "крошечный (< 100 МБ), но фактическое резидентное потребление "
+          "сопоставимо с IVFFlat за счёт mmap-страниц базы. HNSW тоже "
+          "держит свой граф в памяти (синяя полоса сразу над baseline), "
+          "но transient overhead сборки HNSW сопоставим по высоте с "
+          "самим индексом.")
         W()
     W(f"![Средняя per-query latency](img/{run}/05_latency_best.png)")
     W()
