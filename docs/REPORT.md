@@ -6,45 +6,45 @@
 
 ## 1. Условия эксперимента
 
-- **Датасет:** ImageNet-1M ZJU, 2048-D, n_base = 1,281,167, n_query = 10 000 (для свипов), n_gt = 25 000.
+- **Датасет:** ImageNet-1M ZJU, 2048-D, n_base = 1,281,167, n_query = 10 000 (для измерения QPS), n_gt = 25 000.
 - **Метрика расстояния:** L2.
-- **Параллельность:** 8 OpenMP-threads (FAISS).
-- **Платформа:** local single-host (см. notebook 01 для деталей RAM/CPU).
-- **QPS-замер:** `LAB_QPS_REPEAT=3 LAB_QPS_WARMUP=1` (warmup + медиана 3 запусков).
-- **Свипы:** IVFFlat 23 конфигов, IVFPQ 36, IVFSQ 10, HNSW 56 (varyM + varyEFC), LSH 6.
+- **Хост:** Apple M1 Pro (10 физ. / 10 лог. ядер), RAM 16.0 ГБ, Darwin 25.5.0 (arm64), Python 3.13.12.
+- **Параллельность FAISS:** 8 OpenMP-threads.
+- **QPS-замер:** `LAB_QPS_REPEAT=3 LAB_QPS_WARMUP=1` (один warmup + медиана 3 запусков; latency-распределение по чанкам из 50 запросов).
+- **Кол-во конфигов:** IVFFlat 23, IVFPQ 36, IVFSQ 34, HNSW 56 (varyM + varyEFC), LSH 6.
 
 ## 2. Сводка результатов
 
 ![Cross-family Pareto](img/full/05_global_pareto.png)
 
-### 2.1. Operational picks (макс. QPS при первом достижимом recall-флоре)
+### 2.1. Рекомендованная конфигурация на семейство
 
-| Семейство | Recall флор | Recall@100 | QPS | Mean lat. | Index size | Build | Peak RSS | Конфиг |
-|---|---:|---:|---:|---:|---:|---:|---:|---|
-| **IVFFlat** | 0.95 | 0.9696 | 1,097 | 0.911 мс | 9.91 ГБ | 49.0 мин | 25.50 ГБ | `nlist=16384, nprobe=64` |
-| **IVF+PQ** | 0.50 | 0.5341 | 58,467 | 0.017 мс | 98 МБ | 2.7 мин | 16.09 ГБ | `nlist=1024, nprobe=1, M=64, nbits=8` |
-| **IVF+SQ** | 0.95 | 0.9882 | 97 | 10.339 мс | 2.46 ГБ | 19.8 с | 17.66 ГБ | `nlist=256, nprobe=16, sq=SQ8` |
-| **HNSW** | 0.95 | 0.9589 | 7,891 | 0.127 мс | 9.95 ГБ | 6.0 мин | 20.06 ГБ | `M=16, efConstruction=200, efSearch=80` |
-| **LSH** | 0.20 | 0.2520 | 5,146 | 0.194 мс | 41 МБ | 11.8 с | 12.11 ГБ | `nbits=256` |
+| Семейство | Recall@100 | QPS | Mean lat. | Index size | Build | Peak RSS | Конфиг |
+|---|---:|---:|---:|---:|---:|---:|---|
+| **IVFFlat** | 0.9261 | 3,940 | 0.254 мс | 3.85 ГБ | 10.7 мин | 13.27 ГБ | `nlist=4096, nprobe=16` |
+| **IVF+PQ** | 0.7515 | 18,898 | 0.053 мс | 75 МБ | 3.2 мин | 15.16 ГБ | `nlist=1024, nprobe=4, M=128, nbits=8` |
+| **IVF+SQ** | 0.9243 | 7,650 | 0.131 мс | 1,012 МБ | 11.0 мин | 10.77 ГБ | `nlist=4096, nprobe=16, sq=SQ8` |
+| **HNSW** | 0.9025 | 16,478 | 0.061 мс | 3.88 ГБ | 1.9 мин | 10.61 ГБ | `M=16, efConstruction=200, efSearch=40` |
+| **LSH** | 0.3417 | 5,802 | 0.173 мс | 35 МБ | 8.4 с | 6.46 ГБ | `nbits=512` |
 
-### 2.2. «Колено» Парето-кривой по каждому семейству
+### 2.2. Лучший конфиг при Recall@100 ≥ 0.95
 
-| Семейство | Recall@100 | QPS | Index size | Конфиг |
-|---|---:|---:|---:|---|
-| IVFFlat | 0.8643 | 3,969 | 9.91 ГБ | `nlist=16384, nprobe=16` |
-| IVF+PQ | 0.7588 | 13,166 | 200 МБ | `nlist=4096, nprobe=16, M=128, nbits=8` |
-| IVF+SQ | 0.9481 | 425 | 2.46 ГБ | `nlist=256, nprobe=4, sq=SQ8` |
-| HNSW | 0.9175 | 11,850 | 9.87 ГБ | `M=8, efConstruction=200, efSearch=80` |
-| LSH | 0.3099 | 2,846 | 82 МБ | `nbits=512` |
+| Семейство | Recall@100 | QPS | Mean lat. | Index size | Build | Peak RSS | Конфиг |
+|---|---:|---:|---:|---:|---:|---:|---|
+| **IVFFlat** | 0.9581 | 1,101 | 0.910 мс | 3.94 ГБ | 42.8 мин | 13.21 ГБ | `nlist=16384, nprobe=64` |
+| IVF+PQ | — | — | — | — | — | — | _нет конфига_ |
+| **IVF+SQ** | 0.9848 | 2,865 | 0.348 мс | 1,012 МБ | 11.0 мин | 10.77 ГБ | `nlist=4096, nprobe=64, sq=SQ8` |
+| **HNSW** | 0.9685 | 10,460 | 0.095 мс | 3.88 ГБ | 1.9 мин | 10.61 ГБ | `M=16, efConstruction=200, efSearch=80` |
+| LSH | — | — | — | — | — | — | _нет конфига_ |
 
-### 2.3. Победители по квадрантам (по всему свипу)
+### 2.3. Победители по отдельным метрикам (по всему набору измерений)
 
-- **Максимальный Recall@100:** IVFFlat = 1.0000 (`nlist=256, nprobe=256`).
-- **Максимальный QPS:** IVF+PQ = 76,321 при recall 0.492 (`nlist=1024, nprobe=1, M=32, nbits=8`).
-- **Минимальный размер индекса:** LSH = 21 МБ (`nbits=128`).
-- **Самый быстрый билд:** LSH = 8.4 с (`nbits=128`).
+- **Максимальный Recall@100:** IVFFlat = 1.0000, QPS = 16 (`nlist=1024, nprobe=1024`).
+- **Максимальный QPS:** HNSW = 43,398, при Recall@100 = 0.496 (`M=8, efConstruction=200, efSearch=10`).
+- **Минимальный размер индекса:** LSH = 9 МБ, Recall@100 = 0.220, QPS = 18,005 (`nbits=128`).
+- **Самый быстрый билд:** LSH = 2.8 с, Recall@100 = 0.220, QPS = 18,005 (`nbits=128`).
 
-![Operational picks: build / size / RSS / QPS](img/full/05_best_bars.png)
+![Рекомендованные конфиги: build / size / RSS / QPS](img/full/05_best_bars.png)
 
 ![Разложение peak RSS](img/full/05_memory_budget.png)
 
@@ -58,91 +58,99 @@
 
 ### 3.1. IVFFlat
 
-- **Размер свипа:** 23 конфигов.
-- **Recall@100:** 0.221 → 1.0000.
-- **QPS:** 6 → 16,227.
-- **Размер индекса:** 9.79 ГБ → 9.91 ГБ.
-- **Build:** 55.6 с → 49.0 мин.
+- **Конфигов в выборке:** 23.
+- **Recall@100:** от 0.182 (min) до 1.0000 (max).
+- **QPS:** от 16 (min) до 14,582 (max).
+- **Размер индекса:** от 3.82 ГБ до 3.94 ГБ.
+- **Build:** от 44.3 с до 42.8 мин.
 
-Лучшая конфигурация при каждом recall-флоре:
+Лучшая конфигурация при каждом пороге Recall@100 (берём конфиг с максимальным QPS, чей recall ≥ порога):
 
-| Recall флор | Конфиг | Recall@100 | QPS | Mean lat. |
+| Порог Recall@100 | Конфиг | Recall@100 | QPS | Mean lat. |
 |---:|---|---:|---:|---:|
-| 0.99 | `nlist=16384, nprobe=256` | 0.9967 | 265 | 3.768 мс |
-| 0.95 | `nlist=16384, nprobe=64` | 0.9696 | 1,097 | 0.911 мс |
-| 0.90 | `nlist=4096, nprobe=16` | 0.9445 | 1,162 | 0.861 мс |
-| 0.80 | `nlist=16384, nprobe=16` | 0.8643 | 3,969 | 0.252 мс |
-| 0.50 | `nlist=16384, nprobe=4` | 0.5603 | 8,897 | 0.112 мс |
-| 0.20 | `nlist=4096, nprobe=1` | 0.3981 | 16,227 | 0.062 мс |
+| 0.99 | `nlist=16384, nprobe=256` | 0.9949 | 565 | 1.766 мс |
+| 0.95 | `nlist=16384, nprobe=64` | 0.9581 | 1,101 | 0.910 мс |
+| 0.90 | `nlist=4096, nprobe=16` | 0.9261 | 3,940 | 0.254 мс |
+| 0.80 | `nlist=4096, nprobe=16` | 0.9261 | 3,940 | 0.254 мс |
+| 0.50 | `nlist=1024, nprobe=1` | 0.5679 | 14,582 | 0.070 мс |
+| 0.20 | `nlist=1024, nprobe=1` | 0.5679 | 14,582 | 0.070 мс |
+
+![IVFFlat: Recall vs nprobe + QPS vs Recall по nlist](img/full/05_ivfflat_grid.png)
 
 ### 3.2. IVF+PQ
 
-- **Размер свипа:** 36 конфигов.
-- **Recall@100:** 0.377 → 0.7709.
-- **QPS:** 125 → 76,321.
-- **Размер индекса:** 59 МБ → 200 МБ.
-- **Build:** 2.7 мин → 13.3 мин.
+- **Конфигов в выборке:** 36.
+- **Recall@100:** от 0.346 (min) до 0.7881 (max).
+- **QPS:** от 255 (min) до 43,130 (max).
+- **Размер индекса:** от 29 МБ до 99 МБ.
+- **Build:** от 3.0 мин до 11.3 мин.
 
-Лучшая конфигурация при каждом recall-флоре:
+Лучшая конфигурация при каждом пороге Recall@100 (берём конфиг с максимальным QPS, чей recall ≥ порога):
 
-| Recall флор | Конфиг | Recall@100 | QPS | Mean lat. |
+| Порог Recall@100 | Конфиг | Recall@100 | QPS | Mean lat. |
 |---:|---|---:|---:|---:|
-| 0.50 | `nlist=1024, nprobe=1, M=64, nbits=8` | 0.5341 | 58,467 | 0.017 мс |
-| 0.20 | `nlist=1024, nprobe=1, M=32, nbits=8` | 0.4921 | 76,321 | 0.013 мс |
+| 0.50 | `nlist=1024, nprobe=1, M=64, nbits=8` | 0.5289 | 40,544 | 0.025 мс |
+| 0.20 | `nlist=1024, nprobe=1, M=32, nbits=8` | 0.4999 | 43,130 | 0.024 мс |
 
 ![IVFPQ: recall vs nprobe + footprint vs recall](img/full/05_ivfpq_grid.png)
 
 ### 3.3. IVF+SQ
 
-- **Размер свипа:** 10 конфигов.
-- **Recall@100:** 0.684 → 0.9923.
-- **QPS:** 21 → 2,582.
-- **Размер индекса:** 1.23 ГБ → 2.46 ГБ.
-- **Build:** 19.7 с → 19.8 с.
+- **Конфигов в выборке:** 34.
+- **Recall@100:** от 0.352 (min) до 0.9947 (max).
+- **QPS:** от 68 (min) до 27,578 (max).
+- **Размер индекса:** от 494 МБ до 1,012 МБ.
+- **Build:** от 45.2 с до 11.0 мин.
 
-Лучшая конфигурация при каждом recall-флоре:
+Лучшая конфигурация при каждом пороге Recall@100 (берём конфиг с максимальным QPS, чей recall ≥ порога):
 
-| Recall флор | Конфиг | Recall@100 | QPS | Mean lat. |
+| Порог Recall@100 | Конфиг | Recall@100 | QPS | Mean lat. |
 |---:|---|---:|---:|---:|
-| 0.99 | `nlist=256, nprobe=64, sq=SQ8` | 0.9922 | 36 | 27.793 мс |
-| 0.95 | `nlist=256, nprobe=16, sq=SQ8` | 0.9882 | 97 | 10.339 мс |
-| 0.90 | `nlist=256, nprobe=4, sq=SQ8` | 0.9481 | 425 | 2.354 мс |
-| 0.80 | `nlist=256, nprobe=4, sq=SQ4` | 0.8626 | 517 | 1.935 мс |
-| 0.50 | `nlist=256, nprobe=1, sq=SQ4` | 0.6842 | 2,582 | 0.387 мс |
-| 0.20 | `nlist=256, nprobe=1, sq=SQ4` | 0.6842 | 2,582 | 0.387 мс |
+| 0.99 | `nlist=4096, nprobe=256, sq=SQ8` | 0.9943 | 810 | 1.235 мс |
+| 0.95 | `nlist=4096, nprobe=64, sq=SQ8` | 0.9848 | 2,865 | 0.348 мс |
+| 0.90 | `nlist=4096, nprobe=16, sq=SQ8` | 0.9243 | 7,650 | 0.131 мс |
+| 0.80 | `nlist=1024, nprobe=4, sq=SQ8` | 0.8706 | 9,734 | 0.102 мс |
+| 0.50 | `nlist=1024, nprobe=1, sq=SQ8` | 0.5678 | 27,578 | 0.037 мс |
+| 0.20 | `nlist=1024, nprobe=1, sq=SQ8` | 0.5678 | 27,578 | 0.037 мс |
+
+![IVFSQ: Recall vs nprobe + footprint vs recall (SQ4 vs SQ8)](img/full/05_ivfsq_grid.png)
 
 ### 3.4. HNSW
 
-- **Размер свипа:** 56 конфигов.
-- **Recall@100:** 0.478 → 0.9998.
-- **QPS:** 1,059 → 34,489.
-- **Размер индекса:** 9.87 ГБ → 10.25 ГБ.
-- **Build:** 2.7 мин → 13.5 мин.
+- **Конфигов в выборке:** 56.
+- **Recall@100:** от 0.496 (min) до 0.9999 (max).
+- **QPS:** от 1,327 (min) до 43,398 (max).
+- **Размер индекса:** от 3.85 ГБ до 4.00 ГБ.
+- **Build:** от 49.7 с до 4.2 мин.
 
-Лучшая конфигурация при каждом recall-флоре:
+Лучшая конфигурация при каждом пороге Recall@100 (берём конфиг с максимальным QPS, чей recall ≥ порога):
 
-| Recall флор | Конфиг | Recall@100 | QPS | Mean lat. |
+| Порог Recall@100 | Конфиг | Recall@100 | QPS | Mean lat. |
 |---:|---|---:|---:|---:|
-| 0.99 | `M=32, efConstruction=200, efSearch=160` | 0.9923 | 3,830 | 0.261 мс |
-| 0.95 | `M=16, efConstruction=200, efSearch=80` | 0.9589 | 7,891 | 0.127 мс |
-| 0.90 | `M=8, efConstruction=200, efSearch=80` | 0.9175 | 11,850 | 0.085 мс |
-| 0.80 | `M=8, efConstruction=200, efSearch=40` | 0.8132 | 18,441 | 0.054 мс |
-| 0.50 | `M=16, efConstruction=200, efSearch=10` | 0.5794 | 28,606 | 0.035 мс |
-| 0.20 | `M=8, efConstruction=200, efSearch=10` | 0.4785 | 34,489 | 0.029 мс |
+| 0.99 | `M=16, efConstruction=200, efSearch=160` | 0.9909 | 6,286 | 0.159 мс |
+| 0.95 | `M=16, efConstruction=200, efSearch=80` | 0.9685 | 10,460 | 0.095 мс |
+| 0.90 | `M=16, efConstruction=200, efSearch=40` | 0.9025 | 16,478 | 0.061 мс |
+| 0.80 | `M=8, efConstruction=200, efSearch=40` | 0.8352 | 22,408 | 0.045 мс |
+| 0.50 | `M=16, efConstruction=200, efSearch=10` | 0.5943 | 34,493 | 0.029 мс |
+| 0.20 | `M=8, efConstruction=200, efSearch=10` | 0.4959 | 43,398 | 0.023 мс |
+
+![HNSW: Recall vs efSearch + QPS vs Recall по M](img/full/05_hnsw_grid.png)
 
 ### 3.5. LSH
 
-- **Размер свипа:** 6 конфигов.
-- **Recall@100:** 0.192 → 0.3944.
-- **QPS:** 249 → 8,878.
-- **Размер индекса:** 21 МБ → 658 МБ.
-- **Build:** 8.4 с → 2.6 мин.
+- **Конфигов в выборке:** 6.
+- **Recall@100:** от 0.220 (min) до 0.4207 (max).
+- **QPS:** от 517 (min) до 18,005 (max).
+- **Размер индекса:** от 9 МБ до 276 МБ.
+- **Build:** от 2.8 с до 1.0 мин.
 
-Лучшая конфигурация при каждом recall-флоре:
+Лучшая конфигурация при каждом пороге Recall@100 (берём конфиг с максимальным QPS, чей recall ≥ порога):
 
-| Recall флор | Конфиг | Recall@100 | QPS | Mean lat. |
+| Порог Recall@100 | Конфиг | Recall@100 | QPS | Mean lat. |
 |---:|---|---:|---:|---:|
-| 0.20 | `nbits=256` | 0.2520 | 5,146 | 0.194 мс |
+| 0.20 | `nbits=128` | 0.2200 | 18,005 | 0.056 мс |
+
+![LSH: Recall+QPS vs nbits + footprint vs Recall](img/full/05_lsh_grid.png)
 
 ## 4. Масштабирование 100K → 1.28M
 
@@ -182,18 +190,18 @@
 
 | # | Severity | Аномалия | Численное доказательство |
 |---:|---|---|---|
-| 1 | СРЕДНЯЯ | Recall HNSW немонотонен по efConstruction при низком efSearch | `efC=40→R@100=0.722; efC=100→R@100=0.606; efC=200→R@100=0.627; efC=400→R@100=0.634` |
-| 2 | СРЕДНЯЯ | Recall HNSW немонотонен по efConstruction при низком efSearch | `efC=40→R@100=0.851; efC=100→R@100=0.771; efC=200→R@100=0.792; efC=400→R@100=0.800` |
-| 3 | СРЕДНЯЯ | IVFFlat build_s расходится между scaling.csv и sweep CSV (46 %) | `scaling.csv=404s, ivfflat_*.csv=747s for identical config; QPS gap 13 %` |
-| 4 | СРЕДНЯЯ | Потолок recall IVF+PQ ≈ 0.77 | `best PQ config (nlist=1024, M=128, nprobe=256) cannot serve ≥ 0.95 SLA` |
-| 5 | СРЕДНЯЯ | IVF+PQ build_s расходится между scaling.csv и sweep CSV (44 %) | `scaling.csv=436s, ivfpq_*.csv=781s for identical config; QPS gap 10 %` |
-| 6 | СРЕДНЯЯ | LSH build_s расходится между scaling.csv и sweep CSV (27 %) | `scaling.csv=198s, lsh_*.csv=157s for identical config; QPS gap 0 %` |
-| 7 | СРЕДНЯЯ | Колонка latency_p99_ms ≈ latency_ms | `mean p99/mean ratio ≈ 1.00 in every sweep (worst single row 1.137) — column reports p99 of QPS_REPEAT=3 batch retimings, not per-query tail` |
-| 8 | НИЗКАЯ | Peak RSS немонотонен в скейлинге (HNSW) | `21.2→20.3 GB — peak monitor missed a spike or earlier alloc freed` |
-| 9 | НИЗКАЯ | IVFFlat QPS при nprobe=1 растёт с nlist | `QPS(nlist=256)=604 vs QPS(nlist=16384)=13000 (ratio 0.05) — smaller partitions fit in L2 cache` |
-| 10 | НИЗКАЯ | Build_s немонотонен по M (PQ) | `M=32→167.5s; M=64→161.1s; M=128→180.7s` |
-| 11 | НИЗКАЯ | Build_s немонотонен по M (PQ) | `M=32→787.8s; M=64→780.7s; M=128→796.2s` |
-| 12 | НИЗКАЯ | Отрицательный rss_delta_mb | `min=-2964 MB — earlier allocations got freed mid-build` |
+| 1 | СРЕДНЯЯ | Recall HNSW немонотонен по efConstruction при низком efSearch | `efC=40→R@100=0.754; efC=100→R@100=0.614; efC=200→R@100=0.634; efC=400→R@100=0.644` |
+| 2 | СРЕДНЯЯ | Recall HNSW немонотонен по efConstruction при низком efSearch | `efC=40→R@100=0.874; efC=100→R@100=0.782; efC=200→R@100=0.801; efC=400→R@100=0.811` |
+| 3 | СРЕДНЯЯ | HNSW build_s расходится между scaling.csv и sweep CSV | `scaling.csv=400s, hnsw_*.csv=127s for identical config; QPS gap 26 %` |
+| 4 | СРЕДНЯЯ | IVFFlat build_s расходится между scaling.csv и sweep CSV | `scaling.csv=404s, ivfflat_*.csv=640s for identical config; QPS gap 74 %` |
+| 5 | СРЕДНЯЯ | Потолок Recall@100 у IVF+PQ | `best PQ config (nlist=1024, M=128, nprobe=1024) cannot serve ≥ 0.95 SLA` |
+| 6 | СРЕДНЯЯ | IVF+PQ build_s расходится между scaling.csv и sweep CSV | `scaling.csv=436s, ivfpq_*.csv=664s for identical config; QPS gap 8 %` |
+| 7 | СРЕДНЯЯ | LSH build_s расходится между scaling.csv и sweep CSV | `scaling.csv=198s, lsh_*.csv=61s for identical config; QPS gap 52 %` |
+| 8 | НИЗКАЯ | Peak RSS немонотонен в scaling-сценарии (HNSW) | `21.2→20.3 GB — peak monitor missed a spike or earlier alloc freed` |
+| 9 | НИЗКАЯ | IVFFlat nprobe=1 QPS немонотонен по nlist | `nlist=256→2149 QPS; nlist=1024→14582 QPS; nlist=4096→14431 QPS; nlist=16384→1444 QPS` |
+| 10 | НИЗКАЯ | Build_s немонотонен по M (PQ) | `M=32→194.9s; M=64→178.1s; M=128→189.0s` |
+| 11 | НИЗКАЯ | Build_s немонотонен по M (PQ) | `M=32→680.3s; M=64→663.7s; M=128→673.9s` |
+| 12 | НИЗКАЯ | scaling.csv: p99 latency взят со старого `measure_qps` | `sweep CSVs: p99/mean ≈ 1.73 (per-chunk distribution); scaling.csv: ≈ 1.00 — scaling-csv был получен до фикса utils.measure_qps()` |
 
 ### 5.1. Cross-CSV консистентность
 
@@ -201,28 +209,28 @@
 
 | Family | Конфиг | build_s sweep | build_s scaling | Δ build | QPS sweep | QPS scaling | Δ QPS |
 |---|---|---:|---:|---:|---:|---:|---:|
-| IVFFlat | `{'nlist': 4096, 'nprobe': 64}` | 747 с | 404 с | **46 %** | 260 | 225 | 13 % |
-| IVF+PQ | `{'nlist': 4096, 'nprobe': 64, 'M': 64}` | 781 с | 436 с | **44 %** | 8,666 | 7,787 | 10 % |
-| HNSW | `{'M': 32, 'efC': 200, 'efS': 160}` | 429 с | 400 с | **7 %** | 3,714 | 3,762 | 1 % |
-| LSH | `{'nbits': 4096}` | 157 с | 198 с | **27 %** | 249 | 250 | 0 % |
+| IVFFlat | `{'nlist': 4096, 'nprobe': 64}` | 640 с | 404 с | **37 %** | 865 | 225 | 74 % |
+| IVF+PQ | `{'nlist': 4096, 'nprobe': 64, 'M': 64}` | 664 с | 436 с | **34 %** | 8,433 | 7,787 | 8 % |
+| HNSW | `{'M': 32, 'efC': 200, 'efS': 160}` | 127 с | 400 с | **214 %** | 5,098 | 3,762 | 26 % |
+| LSH | `{'nbits': 4096}` | 61 с | 198 с | **225 %** | 517 | 250 | 52 % |
 
 ## 6. Методология и caveats
 
-- `LAB_QPS_REPEAT=3 LAB_QPS_WARMUP=1`, медиана из 3 запусков.
-- `latency_p99_ms` в CSV — p99 по 3 повторам батча, **не per-query**.
-- Train slice = 200 000 (для nlist=16384 → ~12 точек/центроид, FAISS warns).
+- `LAB_QPS_REPEAT=3 LAB_QPS_WARMUP=1`, медиана из 3 запусков + per-chunk p99 (чанк = 50 запросов).
+- Train slice = 200 000 векторов; при nlist=16384 это ~12 точек/центроид — FAISS пишет варнинг `lloyd_3`.
 - Ground truth пересчитан локально через `IndexFlatL2`, кеш `data/gt_n1281167_k100.npy`.
 - Peak RSS включает mmap-страницы базы (доминирует у IVFPQ/LSH).
+- `scaling.csv` ещё не пересобран после фиксов в `utils.measure_qps` и `_build_notebooks.py` — там старый p99 и расхождение build_s, см. §5.
 
 ## 7. Заключение и рекомендации
 
-- **High-recall serving (R@100 ≥ 0.95)** → **HNSW** `M=16, efConstruction=200, efSearch=80`: 7,891 QPS, 0.127 мс средняя latency, 9.95 ГБ на диске, 20.06 ГБ peak RSS (~50 % из которых — mmap base-вектора). Для R≥0.99 — `M=32, efConstruction=200, efSearch=160` (R@100=0.9923, 3,830 QPS).
-- **Минимальный размер индекса** → **IVF+PQ** `nlist=4096, nprobe=16, M=128, nbits=8`: 200 МБ (~51× меньше IVFFlat), R@100=0.759, 13,166 QPS. Потолок семейства — R@100=0.771 (M=128, 16 байт/вектор). Использовать только как кандидат-генератор перед rerank-стадией.
-- **Компрессия с высоким recall** → **IVF+SQ-8** `nlist=256, nprobe=16, sq=SQ8`: R@100=0.9882, 97 QPS, 2.46 ГБ (4× меньше IVFFlat). Per-query latency ~10.3 мс — медленнее HNSW, потому что SQ декодирует на лету при вычислении дистанции.
-- **Exact-ish baseline** → **IVFFlat** `nlist=16384, nprobe=64`: R@100=0.9696, 1,097 QPS, 9.91 ГБ. Билд 49.0 мин. Для прода QPS слишком низкий; ценно как ground-truth-comparable движок и как калибратор GT.
-- **Sub-baseline** → **LSH** даже при `nbits=4096` даёт всего R@100=0.394. При 2048-D случайные гиперплоскости требуют экспоненциального числа бит на единицу cosine-разрешения — footprint уходит за PQ задолго до того, как recall становится приемлемым.
+- **Поиск с высоким Recall@100 (≥ 0.95)** → **HNSW** `M=16, efConstruction=200, efSearch=80`: 10,460 QPS, 0.095 мс средняя latency, 3.88 ГБ на диске, 10.61 ГБ peak RSS (~58 % из которых — mmap-страницы базы, легко освобождаются ОС при необходимости). Для Recall@100 ≥ 0.99 — `M=16, efConstruction=200, efSearch=160` (R@100 = 0.9909, 6,286 QPS).
+- **Минимальный размер индекса** → **IVF+PQ** `nlist=1024, nprobe=4, M=128, nbits=8`: 75 МБ (~53× меньше IVFFlat knee), Recall@100 = 0.752, 18,898 QPS. Потолок семейства — Recall@100 = 0.788 (M=128, 16 байт/вектор). Использовать как кандидат-генератор перед rerank-стадией на оригинальных векторах.
+- **Компрессия с высоким recall** → **IVF+SQ-8** `nlist=4096, nprobe=64, sq=SQ8`: Recall@100 = 0.9848, 2,865 QPS, 1,012 МБ (~3.9× меньше IVFFlat knee). Per-query latency 0.35 мс — медленнее HNSW, потому что SQ декодирует значения на лету при вычислении дистанции, но в разы быстрее, чем IVFFlat на том же recall.
+- **Точный (exact-ish) baseline** → **IVFFlat** `nlist=16384, nprobe=64`: Recall@100 = 0.9581, 1,101 QPS, 3.94 ГБ. Build 42.8 мин. Сборка дорогая, QPS низкий — но индекс хранит сырые float-векторы, поэтому recall максимально приближен к точному поиску. Полезен как калибратор Ground Truth, не как serving-движок.
+- **LSH непригоден на этом датасете** — даже при `nbits=4096` (276 МБ индекс) Recall@100 = 0.421. При 2048-D случайные гиперплоскости требуют экспоненциального числа бит на единицу cosine-разрешения — footprint уходит за PQ задолго до того, как recall становится приемлемым.
 
-**Финальная рекомендация:** HNSW (M=32, efC=200, efS=160) — production-default; IVF+PQ только в связке с rerank-стадией; IVF+SQ-8, если QPS-бюджет ≥ 100 и компрессия критична; IVFFlat — только для оффлайн GT-сравнений; LSH — отбросить.
+**Итог:** HNSW (`M=16, efConstruction=200, efSearch=80`) — дефолтный выбор для high-recall поиска; IVF+PQ — только в связке с rerank-стадией; IVF+SQ-8 — компромисс по размеру/latency, если QPS-бюджет небольшой и хочется ×4 компрессии; IVFFlat — оффлайн-калибровка GT; LSH — отбросить для этого датасета.
 
 
 _Полные CSV — `results/full/`. Графики — `docs/img/full/`. Регенерация — `python3 scripts/analyze_and_report.py --run full`._

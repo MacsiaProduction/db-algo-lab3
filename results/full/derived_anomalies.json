@@ -1,33 +1,28 @@
 [
   {
-    "key": "IVFFlat nprobe=1 QPS scales with nlist",
-    "detail": "QPS(nlist=256)=604 vs QPS(nlist=16384)=13000 (ratio 0.05) \u2014 smaller partitions fit in L2 cache",
+    "key": "IVFFlat nprobe=1 QPS \u043d\u0435\u043c\u043e\u043d\u043e\u0442\u043e\u043d\u0435\u043d \u043f\u043e nlist",
+    "detail": "nlist=256\u21922149 QPS; nlist=1024\u219214582 QPS; nlist=4096\u219214431 QPS; nlist=16384\u21921444 QPS",
     "severity": "low"
   },
   {
     "key": "IVFPQ nlist=1024 build_s non-monotonic in M",
-    "detail": "M=32\u2192167.5s; M=64\u2192161.1s; M=128\u2192180.7s",
+    "detail": "M=32\u2192194.9s; M=64\u2192178.1s; M=128\u2192189.0s",
     "severity": "low"
   },
   {
     "key": "IVFPQ nlist=4096 build_s non-monotonic in M",
-    "detail": "M=32\u2192787.8s; M=64\u2192780.7s; M=128\u2192796.2s",
+    "detail": "M=32\u2192680.3s; M=64\u2192663.7s; M=128\u2192673.9s",
     "severity": "low"
   },
   {
     "key": "HNSW efC monotonicity violated at efS=10",
-    "detail": "efC=40\u2192R@100=0.722; efC=100\u2192R@100=0.606; efC=200\u2192R@100=0.627; efC=400\u2192R@100=0.634",
+    "detail": "efC=40\u2192R@100=0.754; efC=100\u2192R@100=0.614; efC=200\u2192R@100=0.634; efC=400\u2192R@100=0.644",
     "severity": "medium"
   },
   {
     "key": "HNSW efC monotonicity violated at efS=20",
-    "detail": "efC=40\u2192R@100=0.851; efC=100\u2192R@100=0.771; efC=200\u2192R@100=0.792; efC=400\u2192R@100=0.800",
+    "detail": "efC=40\u2192R@100=0.874; efC=100\u2192R@100=0.782; efC=200\u2192R@100=0.801; efC=400\u2192R@100=0.811",
     "severity": "medium"
-  },
-  {
-    "key": "ivf_pq: 12 rows with rss_delta_mb < -100 MB",
-    "detail": "min=-2964 MB \u2014 earlier allocations got freed mid-build",
-    "severity": "low"
   },
   {
     "key": "HNSW: peak RSS dropped n=1,000,000\u21921,281,167",
@@ -35,28 +30,33 @@
     "severity": "low"
   },
   {
-    "key": "IVFPQ max R@100 = 0.771 \u2014 ceiling at this dim",
-    "detail": "best PQ config (nlist=1024, M=128, nprobe=256) cannot serve \u2265 0.95 SLA",
+    "key": "IVFPQ max R@100 = 0.788 \u2014 ceiling at this dim",
+    "detail": "best PQ config (nlist=1024, M=128, nprobe=1024) cannot serve \u2265 0.95 SLA",
     "severity": "medium"
   },
   {
-    "key": "latency_p99_ms \u2248 latency_ms across the dataset",
-    "detail": "mean p99/mean ratio \u2248 1.00 in every sweep (worst single row 1.137) \u2014 column reports p99 of QPS_REPEAT=3 batch retimings, not per-query tail",
+    "key": "scaling.csv: latency_p99_ms \u2014 legacy per-batch p99",
+    "detail": "sweep CSVs: p99/mean \u2248 1.73 (per-chunk distribution); scaling.csv: \u2248 1.00 \u2014 scaling-csv \u0431\u044b\u043b \u043f\u043e\u043b\u0443\u0447\u0435\u043d \u0434\u043e \u0444\u0438\u043a\u0441\u0430 utils.measure_qps()",
+    "severity": "low"
+  },
+  {
+    "key": "IVFFlat: build_s mismatch scaling vs sweep (37 %)",
+    "detail": "scaling.csv=404s, ivfflat_*.csv=640s for identical config; QPS gap 74 %",
     "severity": "medium"
   },
   {
-    "key": "IVFFlat: build_s mismatch scaling vs sweep (46 %)",
-    "detail": "scaling.csv=404s, ivfflat_*.csv=747s for identical config; QPS gap 13 %",
+    "key": "IVFPQ: build_s mismatch scaling vs sweep (34 %)",
+    "detail": "scaling.csv=436s, ivfpq_*.csv=664s for identical config; QPS gap 8 %",
     "severity": "medium"
   },
   {
-    "key": "IVFPQ: build_s mismatch scaling vs sweep (44 %)",
-    "detail": "scaling.csv=436s, ivfpq_*.csv=781s for identical config; QPS gap 10 %",
+    "key": "HNSW: build_s mismatch scaling vs sweep (214 %)",
+    "detail": "scaling.csv=400s, hnsw_*.csv=127s for identical config; QPS gap 26 %",
     "severity": "medium"
   },
   {
-    "key": "LSH: build_s mismatch scaling vs sweep (27 %)",
-    "detail": "scaling.csv=198s, lsh_*.csv=157s for identical config; QPS gap 0 %",
+    "key": "LSH: build_s mismatch scaling vs sweep (225 %)",
+    "detail": "scaling.csv=198s, lsh_*.csv=61s for identical config; QPS gap 52 %",
     "severity": "medium"
   }
 ]
