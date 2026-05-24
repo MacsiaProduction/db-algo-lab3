@@ -1,12 +1,1 @@
 data/
-*.fvecs
-*.ivecs
-*.h5
-.ipynb_checkpoints/
-__pycache__/
-*.pyc
-.venv/
-venv/
-.env
-agent-tools/
-terminals/
