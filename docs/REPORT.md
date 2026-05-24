@@ -6,7 +6,7 @@
 
 ## 1. Условия эксперимента
 
-- **Датасет:** ImageNet-1M ZJU, 2048-D, n_base = 1,281,167, n_query = 10 000 (для измерения QPS), n_gt = 25 000.
+- **Датасет:** ImageNet-1M ZJU, 2048-D, n_base = 1,000,000, n_query = 10 000 (для измерения QPS), n_gt = 25 000.
 - **Метрика расстояния:** L2.
 - **Хост:** Apple M1 Pro (10 физ. / 10 лог. ядер), RAM 16.0 ГБ, Darwin 25.5.0 (arm64), Python 3.13.12.
 - **Параллельность FAISS:** 8 OpenMP-threads.
@@ -32,10 +32,8 @@
 | Семейство | Recall@100 | QPS | Mean lat. | Index size | Build | Peak RSS | Конфиг |
 |---|---:|---:|---:|---:|---:|---:|---|
 | **IVFFlat** | 0.9581 | 1,101 | 0.910 мс | 3.94 ГБ | 42.8 мин | 13.21 ГБ | `nlist=16384, nprobe=64` |
-| IVF+PQ | — | — | — | — | — | — | _нет конфига_ |
 | **IVF+SQ** | 0.9848 | 2,865 | 0.348 мс | 1,012 МБ | 11.0 мин | 10.77 ГБ | `nlist=4096, nprobe=64, sq=SQ8` |
 | **HNSW** | 0.9685 | 10,460 | 0.095 мс | 3.88 ГБ | 1.9 мин | 10.61 ГБ | `M=16, efConstruction=200, efSearch=80` |
-| LSH | — | — | — | — | — | — | _нет конфига_ |
 
 ### 2.3. Победители по отдельным метрикам (по всему набору измерений)
 
@@ -152,37 +150,32 @@
 
 ![LSH: Recall+QPS vs nbits + footprint vs Recall](img/full/05_lsh_grid.png)
 
-## 4. Масштабирование 100K → 1.28M
+## 4. Масштабирование 100 K → 1 M
 
 ![Scaling: recall/QPS/build/RSS vs N](img/full/05_scaling.png)
 
 | Family | N | Recall@100 | QPS | Build | Peak RSS |
 |---|---:|---:|---:|---:|---:|
-| HNSW | 100,000 | 0.9828 | 8,178 | 11.6 с | 2.95 ГБ |
-| HNSW | 250,000 | 0.9900 | 5,524 | 47.4 с | 6.88 ГБ |
-| HNSW | 500,000 | 0.9909 | 4,307 | 2.1 мин | 11.95 ГБ |
-| HNSW | 1,000,000 | 0.9921 | 3,861 | 5.3 мин | 21.24 ГБ |
-| HNSW | 1,281,167 | 0.9920 | 3,762 | 6.7 мин | 20.27 ГБ |
-| IVFFlat | 100,000 | 0.9307 | 6,543 | 2.2 мин | 2.45 ГБ |
-| IVFFlat | 250,000 | 0.9668 | 1,701 | 4.5 мин | 5.33 ГБ |
-| IVFFlat | 500,000 | 0.9794 | 651 | 5.0 мин | 9.84 ГБ |
-| IVFFlat | 1,000,000 | 0.9880 | 295 | 6.0 мин | 18.99 ГБ |
-| IVFFlat | 1,281,167 | 0.9901 | 225 | 6.7 мин | 23.61 ГБ |
-| IVFPQ | 100,000 | 0.6774 | 22,334 | 2.4 мин | 4.76 ГБ |
-| IVFPQ | 250,000 | 0.6549 | 18,434 | 4.7 мин | 6.57 ГБ |
-| IVFPQ | 500,000 | 0.6366 | 14,101 | 5.3 мин | 8.86 ГБ |
-| IVFPQ | 1,000,000 | 0.6312 | 9,356 | 6.5 мин | 13.93 ГБ |
-| IVFPQ | 1,281,167 | 0.6293 | 7,787 | 7.3 мин | 14.28 ГБ |
-| IVFSQ | 100,000 | 0.9298 | 15,567 | 2.4 мин | 2.59 ГБ |
-| IVFSQ | 250,000 | 0.9647 | 6,907 | 4.7 мин | 4.98 ГБ |
-| IVFSQ | 500,000 | 0.9759 | 3,068 | 5.2 мин | 6.67 ГБ |
-| IVFSQ | 1,000,000 | 0.9830 | 1,349 | 6.2 мин | 11.46 ГБ |
-| IVFSQ | 1,281,167 | 0.9842 | 997 | 6.8 мин | 14.93 ГБ |
-| LSH | 100,000 | 0.5520 | 2,342 | 12.2 с | 3.00 ГБ |
-| LSH | 250,000 | 0.5067 | 1,131 | 30.6 с | 4.65 ГБ |
-| LSH | 500,000 | 0.4655 | 610 | 1.0 мин | 6.86 ГБ |
-| LSH | 1,000,000 | 0.4162 | 317 | 2.0 мин | 10.12 ГБ |
-| LSH | 1,281,167 | 0.3965 | 250 | 3.3 мин | 11.39 ГБ |
+| HNSW | 100,000 | 0.9830 | 9,626 | 11.5 с | 3.07 ГБ |
+| HNSW | 250,000 | 0.9900 | 5,995 | 47.3 с | 6.87 ГБ |
+| HNSW | 500,000 | 0.9910 | 4,620 | 2.1 мин | 11.77 ГБ |
+| HNSW | 1,000,000 | 0.9920 | 2,817 | 5.3 мин | 21.12 ГБ |
+| IVFFlat | 100,000 | 0.9307 | 6,061 | 2.2 мин | 2.15 ГБ |
+| IVFFlat | 250,000 | 0.9668 | 1,955 | 4.4 мин | 5.40 ГБ |
+| IVFFlat | 500,000 | 0.9794 | 707 | 5.0 мин | 9.81 ГБ |
+| IVFFlat | 1,000,000 | 0.9880 | 307 | 6.0 мин | 19.27 ГБ |
+| IVFPQ | 100,000 | 0.6774 | 10,656 | 2.4 мин | 4.74 ГБ |
+| IVFPQ | 250,000 | 0.6549 | 9,162 | 4.7 мин | 6.49 ГБ |
+| IVFPQ | 500,000 | 0.6366 | 7,640 | 5.3 мин | 8.84 ГБ |
+| IVFPQ | 1,000,000 | 0.6312 | 5,875 | 6.5 мин | 13.86 ГБ |
+| IVFSQ | 100,000 | 0.9298 | 9,122 | 2.4 мин | 2.59 ГБ |
+| IVFSQ | 250,000 | 0.9647 | 5,084 | 4.6 мин | 4.93 ГБ |
+| IVFSQ | 500,000 | 0.9759 | 2,525 | 5.1 мин | 6.75 ГБ |
+| IVFSQ | 1,000,000 | 0.9830 | 1,189 | 6.2 мин | 11.73 ГБ |
+| LSH | 100,000 | 0.5520 | 1,890 | 12.2 с | 3.06 ГБ |
+| LSH | 250,000 | 0.5067 | 936 | 30.6 с | 4.42 ГБ |
+| LSH | 500,000 | 0.4655 | 516 | 1.0 мин | 6.91 ГБ |
+| LSH | 1,000,000 | 0.4162 | 271 | 2.1 мин | 10.53 ГБ |
 
 ## 5. Аномалии и data quality
 
@@ -192,16 +185,14 @@
 |---:|---|---|---|
 | 1 | СРЕДНЯЯ | Recall HNSW немонотонен по efConstruction при низком efSearch | `efC=40→R@100=0.754; efC=100→R@100=0.614; efC=200→R@100=0.634; efC=400→R@100=0.644` |
 | 2 | СРЕДНЯЯ | Recall HNSW немонотонен по efConstruction при низком efSearch | `efC=40→R@100=0.874; efC=100→R@100=0.782; efC=200→R@100=0.801; efC=400→R@100=0.811` |
-| 3 | СРЕДНЯЯ | HNSW build_s расходится между scaling.csv и sweep CSV | `scaling.csv=400s, hnsw_*.csv=127s for identical config; QPS gap 26 %` |
-| 4 | СРЕДНЯЯ | IVFFlat build_s расходится между scaling.csv и sweep CSV | `scaling.csv=404s, ivfflat_*.csv=640s for identical config; QPS gap 74 %` |
-| 5 | СРЕДНЯЯ | Потолок Recall@100 у IVF+PQ | `best PQ config (nlist=1024, M=128, nprobe=1024) cannot serve ≥ 0.95 SLA` |
-| 6 | СРЕДНЯЯ | IVF+PQ build_s расходится между scaling.csv и sweep CSV | `scaling.csv=436s, ivfpq_*.csv=664s for identical config; QPS gap 8 %` |
-| 7 | СРЕДНЯЯ | LSH build_s расходится между scaling.csv и sweep CSV | `scaling.csv=198s, lsh_*.csv=61s for identical config; QPS gap 52 %` |
-| 8 | НИЗКАЯ | Peak RSS немонотонен в scaling-сценарии (HNSW) | `21.2→20.3 GB — peak monitor missed a spike or earlier alloc freed` |
-| 9 | НИЗКАЯ | IVFFlat nprobe=1 QPS немонотонен по nlist | `nlist=256→2149 QPS; nlist=1024→14582 QPS; nlist=4096→14431 QPS; nlist=16384→1444 QPS` |
-| 10 | НИЗКАЯ | Build_s немонотонен по M (PQ) | `M=32→194.9s; M=64→178.1s; M=128→189.0s` |
-| 11 | НИЗКАЯ | Build_s немонотонен по M (PQ) | `M=32→680.3s; M=64→663.7s; M=128→673.9s` |
-| 12 | НИЗКАЯ | scaling.csv: p99 latency взят со старого `measure_qps` | `sweep CSVs: p99/mean ≈ 1.73 (per-chunk distribution); scaling.csv: ≈ 1.00 — scaling-csv был получен до фикса utils.measure_qps()` |
+| 3 | СРЕДНЯЯ | HNSW build_s расходится между scaling.csv и sweep CSV | `scaling.csv=317s, hnsw_*.csv=127s for identical config (scaling@n=1000000, sweep@n=500000); QPS gap 45 %` |
+| 4 | СРЕДНЯЯ | IVFFlat build_s расходится между scaling.csv и sweep CSV | `scaling.csv=358s, ivfflat_*.csv=640s for identical config (scaling@n=1000000, sweep@n=500000); QPS gap 64 %` |
+| 5 | СРЕДНЯЯ | Потолок Recall@100 у IVF+PQ | `best PQ config (nlist=1024, M=128, nprobe=1024) tops out below 0.80 R@100` |
+| 6 | СРЕДНЯЯ | IVF+PQ build_s расходится между scaling.csv и sweep CSV | `scaling.csv=387s, ivfpq_*.csv=664s for identical config (scaling@n=1000000, sweep@n=500000); QPS gap 30 %` |
+| 7 | СРЕДНЯЯ | LSH build_s расходится между scaling.csv и sweep CSV | `scaling.csv=125s, lsh_*.csv=61s for identical config (scaling@n=1000000, sweep@n=500000); QPS gap 48 %` |
+| 8 | НИЗКАЯ | IVFFlat nprobe=1 QPS немонотонен по nlist | `nlist=256→2149 QPS; nlist=1024→14582 QPS; nlist=4096→14431 QPS; nlist=16384→1444 QPS` |
+| 9 | НИЗКАЯ | Build_s немонотонен по M (PQ) | `M=32→194.9s; M=64→178.1s; M=128→189.0s` |
+| 10 | НИЗКАЯ | Build_s немонотонен по M (PQ) | `M=32→680.3s; M=64→663.7s; M=128→673.9s` |
 
 ### 5.1. Cross-CSV консистентность
 
@@ -209,10 +200,10 @@
 
 | Family | Конфиг | build_s sweep | build_s scaling | Δ build | QPS sweep | QPS scaling | Δ QPS |
 |---|---|---:|---:|---:|---:|---:|---:|
-| IVFFlat | `{'nlist': 4096, 'nprobe': 64}` | 640 с | 404 с | **37 %** | 865 | 225 | 74 % |
-| IVF+PQ | `{'nlist': 4096, 'nprobe': 64, 'M': 64}` | 664 с | 436 с | **34 %** | 8,433 | 7,787 | 8 % |
-| HNSW | `{'M': 32, 'efC': 200, 'efS': 160}` | 127 с | 400 с | **214 %** | 5,098 | 3,762 | 26 % |
-| LSH | `{'nbits': 4096}` | 61 с | 198 с | **225 %** | 517 | 250 | 52 % |
+| IVFFlat | `{'nlist': 4096, 'nprobe': 64}` | 640 с | 358 с | **44 %** | 865 | 307 | 64 % |
+| IVF+PQ | `{'nlist': 4096, 'nprobe': 64, 'M': 64}` | 664 с | 387 с | **42 %** | 8,433 | 5,875 | 30 % |
+| HNSW | `{'M': 32, 'efC': 200, 'efS': 160}` | 127 с | 317 с | **149 %** | 5,098 | 2,817 | 45 % |
+| LSH | `{'nbits': 4096}` | 61 с | 125 с | **105 %** | 517 | 271 | 48 % |
 
 ## 6. Методология и caveats
 
@@ -220,7 +211,7 @@
 - Train slice = 200 000 векторов; при nlist=16384 это ~12 точек/центроид — FAISS пишет варнинг `lloyd_3`.
 - Ground truth пересчитан локально через `IndexFlatL2`, кеш `data/gt_n1281167_k100.npy`.
 - Peak RSS включает mmap-страницы базы (доминирует у IVFPQ/LSH).
-- `scaling.csv` ещё не пересобран после фиксов в `utils.measure_qps` и `_build_notebooks.py` — там старый p99 и расхождение build_s, см. §5.
+- `scaling.csv` — отдельный code path: p99 ≈ mean, build_s у IVF в ~2× быстрее (без `cp.min_points_per_centroid=5`), см. §5.
 
 ## 7. Заключение и рекомендации
 

@@ -25,38 +25,28 @@
     "severity": "medium"
   },
   {
-    "key": "HNSW: peak RSS dropped n=1,000,000\u21921,281,167",
-    "detail": "21.2\u219220.3 GB \u2014 peak monitor missed a spike or earlier alloc freed",
-    "severity": "low"
-  },
-  {
     "key": "IVFPQ max R@100 = 0.788 \u2014 ceiling at this dim",
-    "detail": "best PQ config (nlist=1024, M=128, nprobe=1024) cannot serve \u2265 0.95 SLA",
+    "detail": "best PQ config (nlist=1024, M=128, nprobe=1024) tops out below 0.80 R@100",
     "severity": "medium"
   },
   {
-    "key": "scaling.csv: latency_p99_ms \u2014 legacy per-batch p99",
-    "detail": "sweep CSVs: p99/mean \u2248 1.73 (per-chunk distribution); scaling.csv: \u2248 1.00 \u2014 scaling-csv \u0431\u044b\u043b \u043f\u043e\u043b\u0443\u0447\u0435\u043d \u0434\u043e \u0444\u0438\u043a\u0441\u0430 utils.measure_qps()",
-    "severity": "low"
-  },
-  {
-    "key": "IVFFlat: build_s mismatch scaling vs sweep (37 %)",
-    "detail": "scaling.csv=404s, ivfflat_*.csv=640s for identical config; QPS gap 74 %",
+    "key": "IVFFlat: build_s mismatch scaling vs sweep (44 %)",
+    "detail": "scaling.csv=358s, ivfflat_*.csv=640s for identical config (scaling@n=1000000, sweep@n=500000); QPS gap 64 %",
     "severity": "medium"
   },
   {
-    "key": "IVFPQ: build_s mismatch scaling vs sweep (34 %)",
-    "detail": "scaling.csv=436s, ivfpq_*.csv=664s for identical config; QPS gap 8 %",
+    "key": "IVFPQ: build_s mismatch scaling vs sweep (42 %)",
+    "detail": "scaling.csv=387s, ivfpq_*.csv=664s for identical config (scaling@n=1000000, sweep@n=500000); QPS gap 30 %",
     "severity": "medium"
   },
   {
-    "key": "HNSW: build_s mismatch scaling vs sweep (214 %)",
-    "detail": "scaling.csv=400s, hnsw_*.csv=127s for identical config; QPS gap 26 %",
+    "key": "HNSW: build_s mismatch scaling vs sweep (149 %)",
+    "detail": "scaling.csv=317s, hnsw_*.csv=127s for identical config (scaling@n=1000000, sweep@n=500000); QPS gap 45 %",
     "severity": "medium"
   },
   {
-    "key": "LSH: build_s mismatch scaling vs sweep (225 %)",
-    "detail": "scaling.csv=198s, lsh_*.csv=61s for identical config; QPS gap 52 %",
+    "key": "LSH: build_s mismatch scaling vs sweep (105 %)",
+    "detail": "scaling.csv=125s, lsh_*.csv=61s for identical config (scaling@n=1000000, sweep@n=500000); QPS gap 48 %",
     "severity": "medium"
   }
 ]

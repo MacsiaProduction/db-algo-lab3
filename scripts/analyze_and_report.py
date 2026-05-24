@@ -358,7 +358,7 @@ def detect_anomalies(frames: Dict[str, Optional[pd.DataFrame]]) -> List[dict]:
             out.append(dict(
                 key=f"IVFPQ max R@100 = {r_max:.3f} — ceiling at this dim",
                 detail=f"best PQ config (nlist={int(best.nlist)}, M={int(best.M)}, "
-                       f"nprobe={int(best.nprobe)}) cannot serve ≥ 0.95 SLA",
+                       f"nprobe={int(best.nprobe)}) tops out below 0.80 R@100",
                 severity="medium",
             ))
 
@@ -417,17 +417,27 @@ def detect_anomalies(frames: Dict[str, Optional[pd.DataFrame]]) -> List[dict]:
                 return eval(cfg, {"__builtins__": {}})
             except Exception:
                 return {}
+        def _match_n(d: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+            # Sweep CSVs may run at a different n_base (typically 1.28 M).
+            # We want apples-to-apples: same config AND same n. If the sweep
+            # CSV has a row at exactly n_top, use that; otherwise fall back to
+            # any matching config (and tag the gap in detail).
+            if d is None or "n_base" not in d.columns:
+                return d
+            same = d[d["n_base"] == n_top]
+            return same if len(same) else d
         for _, row in sc_top.iterrows():
             fam = row["family"]
             cfg = _parse(str(row["config"]))
             counter = None
+            n_match = False
             if fam == "IVFFlat" and frames.get("ivf_flat") is not None:
-                d = frames["ivf_flat"]
+                d = _match_n(frames["ivf_flat"])
                 cand = d[(d.nlist == cfg.get("nlist")) & (d.nprobe == cfg.get("nprobe"))]
                 if len(cand):
                     counter = cand.iloc[0]
             elif fam == "IVFPQ" and frames.get("ivf_pq") is not None:
-                d = frames["ivf_pq"]
+                d = _match_n(frames["ivf_pq"])
                 cand = d[
                     (d.nlist == cfg.get("nlist"))
                     & (d.nprobe == cfg.get("nprobe"))
@@ -436,7 +446,7 @@ def detect_anomalies(frames: Dict[str, Optional[pd.DataFrame]]) -> List[dict]:
                 if len(cand):
                     counter = cand.iloc[0]
             elif fam == "HNSW" and frames.get("hnsw_M") is not None:
-                d = frames["hnsw_M"]
+                d = _match_n(frames["hnsw_M"])
                 cand = d[
                     (d.M == cfg.get("M"))
                     & (d.efConstruction == cfg.get("efC"))
@@ -445,22 +455,26 @@ def detect_anomalies(frames: Dict[str, Optional[pd.DataFrame]]) -> List[dict]:
                 if len(cand):
                     counter = cand.iloc[0]
             elif fam == "LSH" and frames.get("lsh") is not None:
-                d = frames["lsh"]
+                d = _match_n(frames["lsh"])
                 cand = d[d.nbits == cfg.get("nbits")]
                 if len(cand):
                     counter = cand.iloc[0]
             if counter is None:
                 continue
+            n_match = ("n_base" in getattr(counter, "index", []) and
+                       int(counter["n_base"]) == n_top)
             b_s = float(row["build_s"])
             b_m = float(counter["build_s"])
             q_s = float(row["qps"])
             q_m = float(counter["qps"])
             if b_m > 0 and abs(b_s - b_m) / b_m > 0.25:
+                tag = "" if n_match else f" (scaling@n={n_top}, sweep@n={int(counter['n_base'])})"
                 out.append(dict(
                     key=f"{fam}: build_s mismatch scaling vs sweep ({100*abs(b_s-b_m)/b_m:.0f} %)",
                     detail=(
                         f"scaling.csv={b_s:.0f}s, {fam.lower()}_*.csv={b_m:.0f}s "
-                        f"for identical config; QPS gap {100*abs(q_s-q_m)/max(q_m,1):.0f} %"
+                        f"for identical config{tag}; QPS gap "
+                        f"{100*abs(q_s-q_m)/max(q_m,1):.0f} %"
                     ),
                     severity="medium",
                 ))
@@ -768,36 +782,43 @@ def plot_cross_csv_consistency(frames: Dict[str, Optional[pd.DataFrame]],
             return eval(cfg, {"__builtins__": {}})
         except Exception:
             return {}
+    def _mn(d: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+        if d is None or "n_base" not in d.columns:
+            return d
+        same = d[d["n_base"] == n_top]
+        return same if len(same) else d
     for _, r in sc_top.iterrows():
         fam = r["family"]
         cfg = _p(str(r["config"]))
         partner = None
         if fam == "IVFFlat" and frames.get("ivf_flat") is not None:
-            d = frames["ivf_flat"]
+            d = _mn(frames["ivf_flat"])
             cand = d[(d.nlist == cfg.get("nlist")) & (d.nprobe == cfg.get("nprobe"))]
             if len(cand):
                 partner = cand.iloc[0]
         elif fam == "IVFPQ" and frames.get("ivf_pq") is not None:
-            d = frames["ivf_pq"]
+            d = _mn(frames["ivf_pq"])
             cand = d[(d.nlist == cfg.get("nlist")) & (d.nprobe == cfg.get("nprobe"))
                      & (d.M == cfg.get("M"))]
             if len(cand):
                 partner = cand.iloc[0]
         elif fam == "HNSW" and frames.get("hnsw_M") is not None:
-            d = frames["hnsw_M"]
+            d = _mn(frames["hnsw_M"])
             cand = d[(d.M == cfg.get("M")) & (d.efConstruction == cfg.get("efC"))
                      & (d.efSearch == cfg.get("efS"))]
             if len(cand):
                 partner = cand.iloc[0]
         elif fam == "LSH" and frames.get("lsh") is not None:
-            d = frames["lsh"]
+            d = _mn(frames["lsh"])
             cand = d[d.nbits == cfg.get("nbits")]
             if len(cand):
                 partner = cand.iloc[0]
         if partner is None:
             continue
+        partner_n = int(partner["n_base"]) if "n_base" in partner.index else n_top
         rows.append(dict(
             family=fam, config=str(cfg),
+            n_scaling=n_top, n_sweep=partner_n,
             build_s_scaling=float(r["build_s"]),
             build_s_sweep=float(partner["build_s"]),
             qps_scaling=float(r["qps"]),
@@ -845,8 +866,13 @@ def plot_cross_csv_consistency(frames: Dict[str, Optional[pd.DataFrame]],
                      f"  Δ {100*abs(a-b)/max(a,1):.0f} %",
                      ha="center", va="bottom", fontsize=8)
 
+    sweep_n = int(df["n_sweep"].max())
+    if sweep_n == n_top:
+        sub = f"at n = {n_top:,}"
+    else:
+        sub = f"scaling@n = {n_top:,} vs sweep@n = {sweep_n:,}"
     fig.suptitle(
-        "Cross-CSV consistency: scaling.csv vs per-family sweep at n=1.28 M",
+        f"Cross-CSV consistency: scaling.csv vs per-family sweep ({sub})",
         fontsize=12, fontweight="bold",
     )
     fig.tight_layout()
@@ -858,6 +884,11 @@ def plot_cross_csv_consistency(frames: Dict[str, Optional[pd.DataFrame]],
 def plot_scaling(scaling: pd.DataFrame, plots: Path) -> None:
     if scaling is None or not len(scaling):
         return
+    def _short(n: int) -> str:
+        if n >= 1_000_000:
+            return f"{n/1_000_000:.2f}".rstrip("0").rstrip(".") + "M"
+        return f"{n//1_000}K"
+    n_min = int(scaling["n"].min()); n_max = int(scaling["n"].max())
     fig, axes = plt.subplots(2, 2, figsize=(12.5, 8.5))
     for fam, sub in scaling.groupby("family"):
         sub = sub.sort_values("n")
@@ -903,7 +934,8 @@ def plot_scaling(scaling: pd.DataFrame, plots: Path) -> None:
     for a in axes.flat:
         a.legend(fontsize=8, loc="best")
         a.grid(True, alpha=0.3)
-    fig.suptitle("Scaling 100 K → 1.28 M  ·  five families · single config each",
+    fig.suptitle(f"Scaling {_short(n_min)} → {_short(n_max)}  ·  "
+                 "five families · single config each",
                  fontsize=12, fontweight="bold")
     fig.tight_layout()
     fig.savefig(plots / "05_scaling.png", bbox_inches="tight")
@@ -1624,16 +1656,16 @@ ANOMALY_RU: Dict[str, Tuple[str, str]] = {
     ),
     "peak RSS dropped": (
         "Peak RSS немонотонен в scaling-сценарии (HNSW)",
-        "В `scaling.csv` HNSW при n=1 000 000 показал 21.24 ГБ, при "
-        "n=1 281 167 — 20.27 ГБ (Δ ≈ −0.97 ГБ). Между этими двумя замерами "
-        "в scaling-цикле прошли IVFFlat@1.28 M, IVFPQ@1.28 M и IVFSQ@1.28 M. "
-        "Каждый GC между сборками и `madvise()` от FAISS постепенно вытесняют "
-        "mmap-страницы базы из page-cache. К моменту HNSW@1.28 M процесс "
-        "стартует с более «холодного» state, чем HNSW@1 M; собственная "
-        "аллокация HNSW уже не восстанавливает потерянные mmap-страницы → "
-        "peak ниже. `RssPeakMonitor` корректно отражает то, что фактически "
-        "было резидентно. Лечение: запускать каждое (family, n) в отдельном "
-        "subprocess — тогда замеры станут независимы."
+        "В `scaling.csv` peak RSS у HNSW при последующем (большем) N "
+        "оказался ниже, чем при предыдущем. Между этими двумя замерами "
+        "в scaling-цикле успели пройти IVFFlat, IVFPQ и IVFSQ на том же N: "
+        "GC между сборками и `madvise()` от FAISS постепенно вытесняют "
+        "mmap-страницы базы из page-cache, поэтому HNSW при большем N "
+        "стартует с более «холодного» state и собственная аллокация HNSW "
+        "уже не восстанавливает потерянные mmap-страницы → peak ниже. "
+        "`RssPeakMonitor` корректно отражает то, что фактически резидентно. "
+        "Лечение: запускать каждое (family, n) в отдельном subprocess — "
+        "тогда замеры станут независимы."
     ),
     "peak RSS": (
         "Высокий peak RSS относительно 28 ГБ цели",
@@ -1663,14 +1695,15 @@ ANOMALY_RU: Dict[str, Tuple[str, str]] = {
     ),
     "IVFFlat: build_s mismatch": (
         "IVFFlat build_s расходится между scaling.csv и sweep CSV",
-        "Одна и та же конфигурация при n=1.28 M даёт разные build_s в "
-        "`scaling.csv` и в `ivf_flat.csv`. Причина — разные code paths: "
-        "ноутбук 02 (sweep) выставляет `idx.cp.min_points_per_centroid = 5` "
-        "и `idx.cp.max_points_per_centroid`, а ноутбук 05 (scaling) — нет. "
+        "Одна и та же `(nlist, nprobe)` даёт разные build_s в `scaling.csv` "
+        "и в `ivf_flat.csv`. Причина — разные code paths: ноутбук 02 (sweep) "
+        "выставляет `idx.cp.min_points_per_centroid = 5` и "
+        "`idx.cp.max_points_per_centroid`, а ноутбук 05 (scaling) — нет. "
         "FAISS при дефолтном пороге (~39 точек/центроид) ограничивает "
-        "число итераций Lloyd-алгоритма → IVF-обучение в ~2× быстрее. "
-        "Recall практически идентичен (Δ ≤ 0.5 п.п.), различаются только "
-        "time-based метрики."
+        "число итераций Lloyd-алгоритма → IVF-обучение быстрее. "
+        "Кроме того, scaling и sweep могут быть на разных n (см. §5.2), "
+        "что добавляет естественную разницу. Recall практически идентичен "
+        "(Δ ≤ 0.5 п.п.), различаются только time-based метрики."
     ),
     "IVFPQ: build_s mismatch": (
         "IVF+PQ build_s расходится между scaling.csv и sweep CSV",
@@ -1851,23 +1884,31 @@ def write_report_ru(
     # 2.2 max-QPS config that meets R@100 >= 0.95 (only families that reach it)
     W("### 2.2. Лучший конфиг при Recall@100 ≥ 0.95")
     W()
-    if not is_short:
-        W("Среди всех конфигов семейства с Recall@100 ≥ 0.95 берётся тот, "
-          "у которого максимальный QPS. Семейства, которые не дотягивают "
-          "до 0.95, отмечены прочерком — для них смотри §3 (полная "
-          "таблица порогов).")
-        W()
-    W("| Семейство | Recall@100 | QPS | Mean lat. | Index size | Build | Peak RSS | Конфиг |")
-    W("|---|---:|---:|---:|---:|---:|---:|---|")
-    high_recall_families: List[str] = []
+    # Determine which families reach the floor first, so we can both skip
+    # empty rows in the table and call out the misses by name in the prose.
+    high_recall_picks: List[Tuple[str, pd.Series]] = []
+    missing_families: List[str] = []
     for fam in FAMILY_ORDER:
         sub = combined[combined.family == fam]
         if not len(sub):
             continue
         b = best_at_threshold(sub, 0.95)
         if b is None:
-            W(f"| {FAMILY_RU[fam]} | — | — | — | — | — | — | _нет конфига_ |")
-            continue
+            missing_families.append(fam)
+        else:
+            high_recall_picks.append((fam, b))
+    if not is_short:
+        skipped = (", ".join(FAMILY_RU[f] for f in missing_families)
+                   if missing_families else "—")
+        W("Среди всех конфигов семейства с Recall@100 ≥ 0.95 берётся тот, "
+          "у которого максимальный QPS. "
+          f"Не дотягивают до 0.95: **{skipped}** "
+          "(для них смотри §3 — полную таблицу порогов).")
+        W()
+    W("| Семейство | Recall@100 | QPS | Mean lat. | Index size | Build | Peak RSS | Конфиг |")
+    W("|---|---:|---:|---:|---:|---:|---:|---|")
+    high_recall_families: List[str] = []
+    for fam, b in high_recall_picks:
         high_recall_families.append(fam)
         W(
             f"| **{FAMILY_RU[fam]}** | {b.recall_100:.4f} | "
@@ -2063,26 +2104,43 @@ def write_report_ru(
     # 4. Масштабирование
     # --------------------------------------------------------------
     if scaling is not None and len(scaling):
-        W("## 4. Масштабирование 100K → 1.28M")
+        n_min = int(scaling["n"].min())
+        n_max = int(scaling["n"].max())
+        def _short_n(n: int) -> str:
+            if n >= 1_000_000:
+                return f"{n/1_000_000:.2f}".rstrip("0").rstrip(".") + " M"
+            return f"{n//1_000} K"
+        n_pts = scaling["n"].nunique()
+        growth = n_max / max(n_min, 1)
+        W(f"## 4. Масштабирование {_short_n(n_min)} → {_short_n(n_max)}")
         W()
         W(f"![Scaling: recall/QPS/build/RSS vs N](img/{run}/05_scaling.png)")
         W()
         if not is_short:
-            W(f"_Данные ниже — из `scaling.csv` (ноутбук 05). Это отдельный "
-              "code path по сравнению с per-family sweep: recall сравним, "
-              "build_s и p99 — нет, см. §5.2._")
+            W(f"_Данные ниже — из `scaling.csv` (ноутбук 05, {n_pts} точек по N "
+              f"от {n_min:,} до {n_max:,}). Это отдельный code path по сравнению "
+              "с per-family sweep: recall сравним, build_s и p99 — нет, см. §5.2._")
             W()
+            # IVFFlat: actual QPS ratio across the scaling range
+            ivfflat_sc = scaling[scaling.family == "IVFFlat"].sort_values("n")
+            hnsw_sc = scaling[scaling.family == "HNSW"].sort_values("n")
+            qps_ivfflat_drop = (ivfflat_sc.qps.iloc[0] / ivfflat_sc.qps.iloc[-1]
+                                if len(ivfflat_sc) >= 2 else None)
+            qps_hnsw_drop = (hnsw_sc.qps.iloc[0] / hnsw_sc.qps.iloc[-1]
+                             if len(hnsw_sc) >= 2 else None)
+            drop_iv = f"~{qps_ivfflat_drop:.0f}×" if qps_ivfflat_drop else "значительная"
+            drop_hn = f"~{qps_hnsw_drop:.1f}×" if qps_hnsw_drop else "сублинейная"
             W("Для каждого семейства взята одна репрезентативная конфигурация "
-              "(см. таблицу) и пять точек по N. **Recall** немного растёт с N "
+              f"(см. таблицу) и {n_pts} точек по N. **Recall** немного растёт с N "
               "у HNSW и IVFFlat (фиксированный k=100 захватывает больше из "
               "более плотного соседства), у IVFPQ **деградирует** (квантизатор "
               "обучен на 200K точек — на больших N теряется тонкая "
               "разрешающая способность), у LSH тоже падает (фиксированное "
               "число случайных гиперплоскостей размывается на большом базе). "
-              "**QPS** падает сильно у IVFFlat (центроидный скан + увеличение "
-              "среднего партишна — ~30× потеря при 12.8× росте N), сублинейно "
-              "у HNSW (graph search; ~2× потеря), у IVFPQ и LSH — линейно "
-              "с n_base.")
+              f"**QPS** падает сильно у IVFFlat (центроидный скан + увеличение "
+              f"среднего партишна — {drop_iv} потеря при {growth:.1f}× росте N), "
+              f"сублинейно у HNSW (graph search; {drop_hn} потеря), "
+              "у IVFPQ и LSH — линейно с n_base.")
             W()
         W("| Family | N | Recall@100 | QPS | Build | Peak RSS |")
         W("|---|---:|---:|---:|---:|---:|")
@@ -2149,11 +2207,22 @@ def write_report_ru(
             W()
             W(f"![Cross-CSV consistency: scaling vs sweep](img/{run}/05_cross_csv_consistency.png)")
             W()
+            n_sc = int(cross_csv_df["n_scaling"].iloc[0])
+            n_sw = int(cross_csv_df["n_sweep"].max())
+            n_match = (n_sc == n_sw)
             if not is_short:
-                W("Одна и та же `(family, config)` при n=1.28 M измерена "
-                  "дважды — в `<family>.csv` (per-family sweep) и в "
-                  "`scaling.csv` (ноутбук 05). Это два разных code path. "
-                  "Сравнение build_s и QPS:")
+                if n_match:
+                    W(f"Одна и та же `(family, config)` при n = {n_sc:,} "
+                      "измерена дважды — в `<family>.csv` (per-family sweep) "
+                      "и в `scaling.csv` (ноутбук 05). Это два разных code path. "
+                      "Сравнение build_s и QPS:")
+                else:
+                    W(f"`scaling.csv` останавливается на n = {n_sc:,}, "
+                      f"per-family sweep сделан при n = {n_sw:,}. Сравниваем "
+                      "одни и те же `(family, config)` в этих двух источниках. "
+                      "Разница включает (a) **разные code paths** и (b) "
+                      "**разный N**, поэтому абсолютные числа не совпадают, "
+                      "но порядок и причины различий видны:")
                 W()
             W("| Family | Конфиг | build_s sweep | build_s scaling | Δ build | QPS sweep | QPS scaling | Δ QPS |")
             W("|---|---|---:|---:|---:|---:|---:|---:|")
@@ -2168,8 +2237,15 @@ def write_report_ru(
                 )
             W()
             if not is_short:
-                W("**Источники расхождений:**")
+                W("**Источники различий:**")
                 W()
+                if not n_match:
+                    W(f"0. **Разный N.** Sweep при n = {n_sw:,}, scaling при "
+                      f"n = {n_sc:,} (~{n_sw/max(n_sc,1):.2f}× больше). "
+                      "Часть Δ build_s и Δ QPS — естественная зависимость от "
+                      "размера базы; ниже учитываем только дополнительный "
+                      "вклад code-path-различий.")
+                    W()
                 W("1. **IVF-семейства** — sweep выставляет "
                   "`idx.cp.min_points_per_centroid = 5`, scaling — нет. "
                   "FAISS с дефолтным минимумом (39 точек/центроид) ограничивает "
@@ -2178,7 +2254,7 @@ def write_report_ru(
                   "но build_s — нет.")
                 W()
                 W("2. **HNSW и LSH** не используют k-means, поэтому "
-                  "`cp.min_points_per_centroid` тут ни при чём. Расхождение для "
+                  "`cp.min_points_per_centroid` тут ни при чём. Различие для "
                   "них — это **базовая run-to-run вариативность** build_s: "
                   "long-running malloc-bound операции на macOS дают 2–3× разброс "
                   "между запусками. Recall и QPS совпадают в пределах ~5 %.")
