@@ -41,18 +41,23 @@ Run notebooks in order (or use the scripts above):
 After the notebooks finish, generate the consolidated review:
 
 ```bash
-python3 scripts/analyze_and_report.py --run full              # default
-python3 scripts/analyze_and_report.py --run full --english    # also emit REPORT_*.md
+python3 scripts/analyze_and_report.py --run full      # default
 ```
 
 It reads `results/{run}/*.csv`, refreshes the cross-algorithm / memory-budget /
 anomaly / cross-CSV-consistency charts under `docs/img/{run}/`, writes derived
-stats next to the CSVs and emits two Russian reports:
+stats next to the CSVs and emits:
 
-- `docs/OTCHET_polnyj_{run}.md` — подробный (draft, full explanations + proofs)
-- `docs/OTCHET_kratkij_{run}.md` — краткий (same charts + tables, minimal prose)
+- `docs/DRAFT.md` — подробный отчёт (full explanations + proofs)
+- `docs/REPORT.md` — краткий отчёт (same charts + tables, minimal prose)
 
-Pass `--english` to additionally generate the legacy English `REPORT_{run}.md`.
+Both reports are in Russian, share the same charts/data, and are paired with
+the static reference document:
+
+- `docs/METHODOLOGY.md` — что измеряется, как, какие алгоритмы используются и
+  как читать каждый из 10 графиков. Не зависит от текущих CSV — остаётся в силе
+  после ре-рана.
+
 Independent of FAISS — runs in seconds.
 
 ## Dataset

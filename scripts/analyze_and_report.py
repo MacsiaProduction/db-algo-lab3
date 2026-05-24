@@ -1430,11 +1430,13 @@ def write_report_ru(
     if is_short:
         W("> Краткая версия. Все графики и числа сохранены, пояснения сведены к "
           "минимуму. Подробные объяснения и доказательства аномалий — в "
-          "`OTCHET_polnyj.md`.")
+          "`DRAFT.md`. Описание методики, алгоритмов и графиков — "
+          "`METHODOLOGY.md`.")
     else:
         W("> Подробная версия (draft). Все наблюдения и аномалии сопровождаются "
           "численными доказательствами. Без них же, в той же раскладке — "
-          "`OTCHET_kratkij.md`.")
+          "`REPORT.md`. Описание методики, алгоритмов и графиков — "
+          "`METHODOLOGY.md`.")
     W()
     W("> Сгенерирован `scripts/analyze_and_report.py` из CSV в "
       f"`results/{run}/`. Графики — `docs/img/{run}/`.")
@@ -1573,19 +1575,24 @@ def write_report_ru(
     W()
 
     def thresholds_table(sub: pd.DataFrame) -> List[str]:
-        out = []
-        out.append("")
-        out.append("| Recall флор | Конфиг | Recall@100 | QPS | Mean lat. |")
-        out.append("|---:|---|---:|---:|---:|")
+        rows: List[str] = []
         for thr in RECALL_DEEP_DIVE:
             b = best_at_threshold(sub, thr)
             if b is None:
-                out.append(f"| {thr:.2f} | _нет конфига_ | — | — | — |")
                 continue
-            out.append(
+            rows.append(
                 f"| {thr:.2f} | `{config_str(b)}` | {b.recall_100:.4f} | "
                 f"{b.qps:,.0f} | {b.latency_ms:.3f} мс |"
             )
+        if not rows:
+            return ["", "_Ни одна конфигурация семейства не дотягивает до минимального "
+                    "порога Recall@100 ≥ 0.20._"]
+        out: List[str] = [
+            "",
+            "| Recall флор | Конфиг | Recall@100 | QPS | Mean lat. |",
+            "|---:|---|---:|---:|---:|",
+        ]
+        out.extend(rows)
         return out
 
     for fam in FAMILY_ORDER:
@@ -1907,10 +1914,8 @@ def write_report_ru(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run", default="full", choices=("full", "light"),
-                        help="which results dir to read")
+                        help="which results dir to read (default: full)")
     parser.add_argument("--quiet", action="store_true")
-    parser.add_argument("--english", action="store_true",
-                        help="also emit REPORT_<run>.md (English legacy)")
     args = parser.parse_args()
 
     frames, results_dir, plots_dir = load_run(args.run)
@@ -1939,21 +1944,17 @@ def main() -> int:
     plot_anomalies(anomalies, plots_dir)
     cross_csv_df = plot_cross_csv_consistency(frames, plots_dir)
 
-    # Primary deliverable — two Russian reports.
+    # Two Russian reports built from the SAME source data and charts.
+    # Naming is fixed (no run suffix) — the user pins one canonical
+    # report pair.  Pass --run light to regenerate them off light data.
     write_report_ru(args.run, summary, anomalies, frames, cross_csv_df,
-                    ROOT / "docs" / f"OTCHET_polnyj_{args.run}.md",
-                    mode="full")
+                    ROOT / "docs" / "DRAFT.md", mode="full")
     write_report_ru(args.run, summary, anomalies, frames, cross_csv_df,
-                    ROOT / "docs" / f"OTCHET_kratkij_{args.run}.md",
-                    mode="short")
-
-    if args.english:
-        write_report(args.run, summary, anomalies, frames,
-                     ROOT / "docs" / f"REPORT_{args.run}.md")
+                    ROOT / "docs" / "REPORT.md", mode="short")
 
     if not args.quiet:
-        print(f"wrote docs/OTCHET_polnyj_{args.run}.md (подробный)")
-        print(f"wrote docs/OTCHET_kratkij_{args.run}.md (краткий)")
+        print(f"wrote docs/DRAFT.md (подробный, --run {args.run})")
+        print(f"wrote docs/REPORT.md (краткий, --run {args.run})")
         print(f"updated plots in {plots_dir}")
         print(f"derived stats in {results_dir}/derived_*")
         print(f"{len(anomalies)} anomaly flag(s).")
