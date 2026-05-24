@@ -2371,7 +2371,7 @@ def write_report_ru(
 
     h = _best_at("HNSW", 0.95)
     if h is not None:
-        mmap_frac = max(0.0, (h.rss_peak_mb - h.rss_mb)) / max(1.0, h.rss_peak_mb)
+        transient_frac = max(0.0, (h.rss_peak_mb - h.rss_mb)) / max(1.0, h.rss_peak_mb)
         h99 = _best_at("HNSW", 0.99)
         h99_txt = (f" Для Recall@100 ≥ 0.99 — `{config_str(h99)}` "
                    f"(R@100 = {h99.recall_100:.4f}, {h99.qps:,.0f} QPS)."
@@ -2382,8 +2382,8 @@ def write_report_ru(
             f"{h.latency_ms:.3f} мс средняя latency, "
             f"{fmt_mb(h.size_mb)} на диске, "
             f"{fmt_mb(h.rss_peak_mb)} peak RSS "
-            f"(~{mmap_frac*100:.0f} % из которых — mmap-страницы базы, "
-            f"легко освобождаются ОС при необходимости).{h99_txt}"
+            f"(~{transient_frac*100:.0f} % — transient overhead сборки, "
+            f"освобождается после `commit`/возврата).{h99_txt}"
         )
     pq_max = combined[combined.family == "IVFPQ"]
     if len(pq_max):
